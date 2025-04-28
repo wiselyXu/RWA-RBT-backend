@@ -17,8 +17,8 @@ services:
       - /etc/timezone:/etc/timezone:ro
       - /root/server/config:/app/config
     environment:
-      - PHAROS_RPC_URL=https://devnet.dplabs-internal.com
-      - INVOICE_CONTRACT_ADDRESS=0x8890386170F6c976Fdb781B757F9b6B66CC0Cf31
+      - PHAROS_RPC_URL=https://rpc.sepolia.mantle.xyz
+      - INVOICE_CONTRACT_ADDRESS=0x3fdBBc8074978c7fd8941efB71d1a8d71327E1C1
       - SIGNER_PRIVATE_KEY=a799113664dc565f586f66efab71888e9f5cecd3984d79fd51dab5837915b7a6
 
 
