@@ -1,0 +1,25 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      target: server
+    container_name: server
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: 500m
+    ports:
+      - "8888:8888"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /root/server/config:/app/config
+    environment:
+      - PHAROS_RPC_URL=https://devnet.dplabs-internal.com
+      - INVOICE_CONTRACT_ADDRESS=0x8890386170F6c976Fdb781B757F9b6B66CC0Cf31
+      - SIGNER_PRIVATE_KEY=a799113664dc565f586f66efab71888e9f5cecd3984d79fd51dab5837915b7a6
+
+
+

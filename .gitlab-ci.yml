@@ -1,0 +1,40 @@
+image: rust:latest
+
+variables:
+  CARGO_HOME: $CI_PROJECT_DIR/.cargo
+  APP_NAME: exchange
+
+# 定义stages
+stages:
+  - build
+  - deploy
+  - acr
+# 缓存依赖
+cache:
+  paths:
+    - target/
+    - .cargo/
+# 编译
+build:
+  stage: build
+  script:
+    - whoami
+    - cargo --version
+    - cargo build --release
+  artifacts:
+    paths:
+      - target/release/gateway
+      - config
+    expire_in: 1 week
+
+# 构建Docker镜像并启动服务
+deploy:
+  stage: deploy
+  script:
+    - docker compose up --force-recreate --build -d
+
+acr:
+  stage: acr
+  when: manual
+  script:
+    - make acr

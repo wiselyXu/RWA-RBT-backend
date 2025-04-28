@@ -1,0 +1,33 @@
+[package]
+name = "service"
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+
+
+# Workspace dependencies
+common = { workspace = true }
+configs = { workspace = true }
+pharos_interact = { workspace = true }
+
+
+salvo-oapi = { workspace = true }
+# MongoDB
+mongodb = { workspace = true }
+
+redis = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] } # Ensure features needed by async fn
+log = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+chrono = { workspace = true }
+futures = "0.3.31"
+schemars = "0.8"
+regex = "1.11.1"

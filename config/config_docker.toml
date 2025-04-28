@@ -1,0 +1,41 @@
+[server]
+name = "server"
+version = "0.1.11"
+# 服务器ip 端口
+ip = "0.0.0.0"
+# 服务器端口
+port = 8888
+
+debug = true
+# api前缀
+api_prefix = "/rwa"
+
+[redis]
+# url = "redis://:sbxz4014@192.168.6.31:6579/"
+url = "redis://:pharos@43.134.99.111:6379/"
+
+[jwt]
+secret = "pharos_rwa"
+
+
+[kafka]
+url = "192.168.6.31:9094"
+order_command_topic = "order_commands_dev"
+order_match_topic = "order_match_dev"
+depth_topic = "depth_dev"
+trade_topic = "trade"
+account_match_topic = "account_match_topic"
+group = "ubuntu_group"
+producer_timeout_ms = 1000
+
+[database]
+# url = 'mysql://exchange:sbxz4014@192.168.6.31:3307/rwa' mongodb://localhost:27017
+#url = 'mongodb://admin:pharos@43.134.99.111:27017/pharos_rwa'
+url = 'mongodb://admin:pharos@43.134.99.111:27017/pharos_rwa?authSource=admin&authMechanism=SCRAM-SHA-256'
+username = "admin"
+password = "pharos"
+init_database = true
+sync_tables = true
+
+
+

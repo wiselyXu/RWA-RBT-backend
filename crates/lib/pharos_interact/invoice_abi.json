@@ -1,0 +1,383 @@
+[
+    {
+        "inputs": [
+            {
+                "components": [
+                    {
+                        "internalType": "string",
+                        "name": "invoiceNumber",
+                        "type": "string"
+                    },
+                    {
+                        "internalType": "address",
+                        "name": "payee",
+                        "type": "address"
+                    },
+                    {
+                        "internalType": "address",
+                        "name": "payer",
+                        "type": "address"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "amount",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "string",
+                        "name": "ipfsHash",
+                        "type": "string"
+                    },
+                    {
+                        "internalType": "string",
+                        "name": "contractHash",
+                        "type": "string"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "timestamp",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "dueDate",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "string",
+                        "name": "tokenBatch",
+                        "type": "string"
+                    },
+                    {
+                        "internalType": "bool",
+                        "name": "isCleared",
+                        "type": "bool"
+                    },
+                    {
+                        "internalType": "bool",
+                        "name": "isValid",
+                        "type": "bool"
+                    }
+                ],
+                "internalType": "struct Invoice.InvoiceData[]",
+                "name": "_invoices",
+                "type": "tuple[]"
+            }
+        ],
+        "name": "batchCreateInvoices",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "string",
+                "name": "_batchId",
+                "type": "string"
+            },
+            {
+                "internalType": "string[]",
+                "name": "_invoiceNumbers",
+                "type": "string[]"
+            },
+            {
+                "internalType": "address",
+                "name": "_stableToken",
+                "type": "address"
+            },
+            {
+                "internalType": "uint256",
+                "name": "_minTerm",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "_maxTerm",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "_interestRate",
+                "type": "uint256"
+            }
+        ],
+        "name": "createTokenBatch",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "string",
+                "name": "_batchId",
+                "type": "string"
+            }
+        ],
+        "name": "confirmTokenBatchIssue",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "string",
+                "name": "_batchId",
+                "type": "string"
+            },
+            {
+                "internalType": "uint256",
+                "name": "_amount",
+                "type": "uint256"
+            }
+        ],
+        "name": "purchaseShares",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "components": [
+                    {
+                        "internalType": "string",
+                        "name": "batchId",
+                        "type": "string"
+                    },
+                    {
+                        "internalType": "address",
+                        "name": "payer",
+                        "type": "address"
+                    },
+                    {
+                        "internalType": "address",
+                        "name": "payee",
+                        "type": "address"
+                    },
+                    {
+                        "internalType": "string",
+                        "name": "invoiceNumber",
+                        "type": "string"
+                    },
+                    {
+                        "internalType": "bool",
+                        "name": "checkValid",
+                        "type": "bool"
+                    }
+                ],
+                "internalType": "struct Invoice.QueryParams",
+                "name": "params",
+                "type": "tuple"
+            }
+        ],
+        "name": "queryInvoices",
+        "outputs": [
+            {
+                "components": [
+                    {
+                        "components": [
+                            {
+                                "internalType": "string",
+                                "name": "invoiceNumber",
+                                "type": "string"
+                            },
+                            {
+                                "internalType": "address",
+                                "name": "payee",
+                                "type": "address"
+                            },
+                            {
+                                "internalType": "address",
+                                "name": "payer",
+                                "type": "address"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "amount",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "string",
+                                "name": "ipfsHash",
+                                "type": "string"
+                            },
+                            {
+                                "internalType": "string",
+                                "name": "contractHash",
+                                "type": "string"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "timestamp",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "uint256",
+                                "name": "dueDate",
+                                "type": "uint256"
+                            },
+                            {
+                                "internalType": "string",
+                                "name": "tokenBatch",
+                                "type": "string"
+                            },
+                            {
+                                "internalType": "bool",
+                                "name": "isCleared",
+                                "type": "bool"
+                            },
+                            {
+                                "internalType": "bool",
+                                "name": "isValid",
+                                "type": "bool"
+                            }
+                        ],
+                        "internalType": "struct Invoice.InvoiceData[]",
+                        "name": "invoices",
+                        "type": "tuple[]"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "total",
+                        "type": "uint256"
+                    }
+                ],
+                "internalType": "struct Invoice.QueryResult",
+                "name": "",
+                "type": "tuple"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "string",
+                "name": "_batchId",
+                "type": "string"
+            }
+        ],
+        "name": "getTokenBatch",
+        "outputs": [
+            {
+                "components": [
+                    {
+                        "internalType": "string",
+                        "name": "batchId",
+                        "type": "string"
+                    },
+                    {
+                        "internalType": "address",
+                        "name": "payee",
+                        "type": "address"
+                    },
+                    {
+                        "internalType": "address",
+                        "name": "payer",
+                        "type": "address"
+                    },
+                    {
+                        "internalType": "address",
+                        "name": "stableToken",
+                        "type": "address"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "minTerm",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "maxTerm",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "interestRate",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "totalAmount",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "issueDate",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "bool",
+                        "name": "isSigned",
+                        "type": "bool"
+                    },
+                    {
+                        "internalType": "bool",
+                        "name": "isIssued",
+                        "type": "bool"
+                    },
+                    {
+                        "internalType": "string[]",
+                        "name": "invoiceNumbers",
+                        "type": "string[]"
+                    }
+                ],
+                "internalType": "struct Invoice.InvoiceTokenBatch",
+                "name": "",
+                "type": "tuple"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "_user",
+                "type": "address"
+            }
+        ],
+        "name": "getUserBatches",
+        "outputs": [
+            {
+                "internalType": "string[]",
+                "name": "",
+                "type": "string[]"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "string",
+                "name": "_invoiceNumber",
+                "type": "string"
+            }
+        ],
+        "name": "invalidateInvoice",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "pause",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "unpause",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    }
+]
