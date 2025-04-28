@@ -24,7 +24,6 @@ use std::convert::From;
 use std::str::FromStr;
 use std::sync::Arc;
 
-
 // --- Handlers ---
 /// 创建一个票据 (Standard endpoint for creating invoice directly in DB)
 #[salvo::oapi::endpoint(
@@ -43,9 +42,7 @@ pub async fn create_invoice(req: JsonBody<InvoiceDataDto>, depot: &mut Depot) ->
 
     // 1. Get authenticated user address from depot (inserted by auth_token middleware)
     let user_address = match depot.get::<String>("user_address") {
-        Ok(address_ref) => {
-            address_ref.as_str()
-        },
+        Ok(address_ref) => address_ref.as_str(),
         Err(e) => {
             log::error!("Authenticated user address not found or wrong type in depot: {:?}", e);
             return Err(res_json_err("User not authenticated"));
@@ -53,7 +50,7 @@ pub async fn create_invoice(req: JsonBody<InvoiceDataDto>, depot: &mut Depot) ->
     };
 
     let data = req.into_inner();
-    log::warn!("create_invoice:{:?}",data.clone());
+    log::warn!("create_invoice:{:?}", data.clone());
     match repo.create_from_blockchain(&data).await {
         Ok(invoice) => {
             // Convert the created Invoice entity to InvoiceDto for the response
@@ -235,7 +232,7 @@ async fn query_and_save_from_blockchain(invoice_number: &str, depot: &mut Depot,
         is_cleared: None,
         is_valid: None,
     };
-    if invoice_number.eq("") {
+    if invoice_number.eq("all") {
         params.invoice_number = None;
     }
 
@@ -257,14 +254,37 @@ async fn query_and_save_from_blockchain(invoice_number: &str, depot: &mut Depot,
 
                 // Save each found invoice to DB
                 for invoice_data_dto in blockchain_invoices_data {
-                    match repo.create_from_blockchain(&invoice_data_dto).await {
-                        Ok(saved_invoice) => {
-                            log::info!("Successfully saved invoice {} from blockchain to DB.", saved_invoice.invoice_number);
-                            saved_invoice_dtos.push(InvoiceDto::from(&saved_invoice));
+                    // 首先，尝试根据 invoice_number 查找票据
+                    match repo.find_by_invoice_number(&invoice_data_dto.invoice_number).await {
+                        // 查找成功，并且找到了票据
+                        Ok(Some(existing_invoice)) => {
+                            log::info!(
+                                "Invoice {} already exists in DB with id {:?}, skipping creation.",
+                                existing_invoice.invoice_number,
+                                existing_invoice.id
+                            );
+                            // 可选：如果需要，您可以在这里将找到的现有票据 DTO 添加到 saved_invoice_dtos
+                            saved_invoice_dtos.push(InvoiceDto::from(&existing_invoice));
                         }
+                        // 查找成功，但没有找到票据
+                        Ok(None) => {
+                            // 票据不存在，可以安全地尝试创建
+                            log::debug!("Invoice {} not found in DB, attempting to create from blockchain data.", invoice_data_dto.invoice_number);
+                            match repo.create_from_blockchain(&invoice_data_dto).await {
+                                Ok(saved_invoice) => {
+                                    log::info!("Successfully saved new invoice {} from blockchain to DB.", saved_invoice.invoice_number);
+                                    saved_invoice_dtos.push(InvoiceDto::from(&saved_invoice));
+                                }
+                                Err(e) => {
+                                    // 创建过程中发生错误
+                                    log::error!("Failed to save new invoice {} from blockchain to DB: {}", invoice_data_dto.invoice_number, e);
+                                }
+                            }
+                        }
+                        // 查找过程中发生错误
                         Err(e) => {
-                            // Log error but continue trying to save others if any
-                            log::error!("Failed to save invoice {} from blockchain to DB: {}", invoice_data_dto.invoice_number, e);
+                            log::error!("Failed to check existence for invoice {}: {}. Skipping creation.", invoice_data_dto.invoice_number, e);
+                            // 如果查找失败，也跳过创建，避免潜在的重复
                         }
                     }
                 }

@@ -1,3 +1,4 @@
+#![allow(warnings)]
 mod router;
 mod controller;
 mod utils;
