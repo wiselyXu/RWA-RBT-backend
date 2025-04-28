@@ -1,3 +1,4 @@
+#![allow(warnings)]
 pub mod cfgs;
 pub mod get_config;
 

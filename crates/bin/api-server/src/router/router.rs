@@ -11,7 +11,11 @@ pub fn init_user_router() -> Router {
         .push(Router::with_path("/login").post(user_controller::login))
         // 绑定企业路由 (需要认证)
         .hoop(common_controller::auth_token)
-        .push(Router::with_path("/bind-enterprise").post(user_controller::bind_enterprise))
+        .push(
+            Router::with_path("/bind-enterprise")
+                .hoop(common_controller::auth_token)
+                .post(user_controller::bind_enterprise),
+        )
 }
 
 pub fn init_enterprise_router() -> Router {
@@ -20,8 +24,11 @@ pub fn init_enterprise_router() -> Router {
         .push(Router::with_path("/list").get(enterprise_controller::list_enterprises))
         .push(Router::with_path("/detail").get(enterprise_controller::get_enterprise_by_id))
         .push(Router::with_path("/del").delete(enterprise_controller::delete_enterprise))
-        .hoop(common_controller::auth_token)
-        .post(enterprise_controller::create_enterprise)
+        .push(
+            Router::with_path("/create")
+                .hoop(common_controller::auth_token)
+                .post(enterprise_controller::create_enterprise),
+        )
 }
 
 pub fn init_invoice_router() -> Router {
@@ -30,6 +37,5 @@ pub fn init_invoice_router() -> Router {
         .push(Router::with_path("/list").get(invoice_controller::list_invoices))
         .push(Router::with_path("/detail").get(invoice_controller::query_invoice_data))
         .push(Router::with_path("/del").delete(invoice_controller::delete_invoice))
-        .hoop(common_controller::auth_token)
-        .post(invoice_controller::create_invoice)
+        .push(Router::with_path("/create").hoop(common_controller::auth_token).post(invoice_controller::create_invoice))
 }

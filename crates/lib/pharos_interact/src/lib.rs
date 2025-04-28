@@ -1,3 +1,4 @@
+#![allow(warnings)]
 use anyhow::{anyhow, Context, Result};
 use dotenv::dotenv;
 use ethers::prelude::*;
@@ -8,18 +9,17 @@ use std::convert::TryFrom;
 use std::env;
 use std::sync::Arc; // Import anyhow Result, Context, and anyhow!
 
+use log::error;
+use salvo_oapi::ToSchema;
+use common::domain::dto::invoice_dto::InvoiceDataDto;
+use common::domain::dto::query_invoice_dto::QueryParamsDto;
+
 // Regenerate bindings using the updated ABI
 abigen!(
     InvoiceContractABI,   // Name of the generated module
     "./invoice_abi.json", // Path to the ABI file
     event_derives(serde::Deserialize, serde::Serialize)
 );
-
-
-use log::error;
-use salvo_oapi::ToSchema;
-use common::domain::dto::invoice_dto::InvoiceDataDto;
-use common::domain::dto::query_invoice_dto::QueryParamsDto;
 
 impl TryFrom<InvoiceDataDto> for InvoiceData {
     type Error = anyhow::Error; // Change associated error type to anyhow::Error
@@ -111,7 +111,7 @@ impl<M: Middleware + Send + Sync + 'static> ContractQuerier for InvoiceContract<
                 Some(addr_str) => addr_str.parse::<Address>().context("Invalid payee address in query")?,
                 None => Address::zero(),
             },
-            invoice_number: "".to_string(), // Use unwrap_or_default for Option<String>
+            invoice_number: params_dto.invoice_number.unwrap_or_else(|| "".to_string()),
             payer: match params_dto.payer {
                 Some(addr_str) => addr_str.parse::<Address>().context("Invalid payer address in query")?,
                 None => Address::zero(),
@@ -123,6 +123,7 @@ impl<M: Middleware + Send + Sync + 'static> ContractQuerier for InvoiceContract<
             check_valid: params_dto.is_valid.unwrap_or(false), // Assuming check_valid corresponds to is_valid query?
         };
 
+        log::info!("Query_Invoices parameters: {:?}", params.clone());
         // Call the contract
         let result: QueryResult = self.contract.query_invoices(params).call().await.map_err(|e| {
             error!("Error calling queryInvoices: {}", e);
@@ -161,7 +162,7 @@ impl<M: Middleware + Send + Sync + 'static> ContractWriter for InvoiceContract<M
         log::warn!("Estimated gas for batchCreateInvoices: {}", gas_estimate);
 
         // 3. Set gas limit with a buffer
-        let gas_limit = gas_estimate * 2;
+        let gas_limit = gas_estimate * 1; // Add a 25% buffer to the estimate
 
         
 
@@ -324,3 +325,216 @@ pub async fn initialize_contract_from_env() -> Result<InvoiceContract<SignerMidd
 
     Ok(InvoiceContract::new(contract_address, client))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use common::domain::dto::invoice_dto::InvoiceDataDto;
+    use common::domain::dto::query_invoice_dto::QueryParamsDto;
+
+    // Test function for querying invoices
+    async fn test_query_invoices(contract: &impl ContractQuerier) -> Result<()> {
+        println!("\n--- Testing queryInvoices ---");
+
+        let query_params = QueryParamsDto {
+            payer: None, // Query any payer
+            is_cleared: None,
+            payee: None, // Query any payee
+            invoice_number: None, // Query for the specific invoice number
+            is_valid: None,
+        };
+
+        let query_result = contract.query_invoices(query_params.clone()).await?;
+        println!("Query successful. Total matching invoices found: {}", query_result.len());
+        println!("Fetched Invoices:");
+
+        if query_result.is_empty() {
+            println!("  No matching invoices found.");
+        } else {
+            for invoice_data in query_result.iter() {
+                // Print details of each found invoice
+                println!(
+                    "  - Num: {}, Payee: {}, Payer: {}, Amount: {}, Valid: {}, Cleared: {}, Batch: {}",
+                    invoice_data.invoice_number, invoice_data.payee, invoice_data.payer, invoice_data.amount, 
+                    invoice_data.is_valid, invoice_data.is_cleared, invoice_data.token_batch
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    // Test function for creating invoices
+    async fn test_batch_create_invoices(contract: &impl ContractWriter) -> Result<()> {
+        println!("\n--- Testing batchCreateInvoices ---");
+        println!("WARNING: This will create REAL invoices on the blockchain");
+
+        // Example payee/payer addresses - REPLACE WITH REAL ADDRESSES FOR TESTING
+        let payee_address = "0x95459aed5538bfa47a194d3a0bbbe7a472b5dcd0";
+        let payer_address = "0x360a0E35B3e3b678069E3E84c20889A9399A3fF7";
+
+        // Create sample invoices - adjust as needed
+        let invoices = vec![InvoiceDataDto {
+            invoice_number: format!("INV{}", chrono::Utc::now().timestamp()), // Make unique
+            payee: payee_address.to_string(),
+            payer: payer_address.to_string(),
+            amount: "1000000000000000000".to_string(), // 1 ETH in wei
+            ipfs_hash: "QmExample1".to_string(),
+            contract_hash: "0x1234567890abcdef".to_string(),
+            timestamp: chrono::Utc::now().timestamp().to_string(), // Will be set by contract
+            due_date: (chrono::Utc::now() + chrono::Duration::days(30)).timestamp().to_string(),
+            token_batch: "".to_string(), // Empty for now
+            is_cleared: false,
+            is_valid: false,
+        }];
+
+        println!("Attempting to create invoice(s): {:?}", invoices);
+
+        match contract.batch_create_invoices(invoices).await {
+            Ok(receipt) => {
+                println!("Invoices created successfully!");
+                println!("Transaction receipt: {:?}", receipt);
+            }
+            Err(e) => {
+                println!("Failed to create invoices: {}", e);
+                return Err(e);
+            }
+        }
+
+        Ok(())
+    }
+
+    // Test function for creating a token batch
+    async fn test_create_token_batch(contract: &impl ContractWriter) -> Result<()> {
+        println!("\n--- Testing createTokenBatch ---");
+        println!("WARNING: This will create a REAL token batch on the blockchain");
+
+        // Create a unique batch ID
+        let batch_id = format!("BATCH{}", chrono::Utc::now().timestamp());
+
+        // Example invoice numbers - MUST BE EXISTING INVOICE NUMBERS on the blockchain
+        let invoice_numbers = vec!["INV001".to_string(), "INV002".to_string()];
+
+        // Example stable token address - REPLACE WITH REAL TOKEN ADDRESS
+        let stable_token = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"; // Example: WETH address
+
+        // Terms
+        let min_term = "2592000".to_string(); // 30 days in seconds
+        let max_term = "7776000".to_string(); // 90 days in seconds
+        let interest_rate = "500".to_string(); // 5% represented as 500 (contract may use basis points)
+
+        println!("Creating token batch '{}' with {} invoices...", batch_id, invoice_numbers.len());
+
+        match contract
+            .create_token_batch(batch_id.clone(), invoice_numbers, stable_token.to_string(), min_term, max_term, interest_rate)
+            .await
+        {
+            Ok(receipt) => {
+                println!("Token batch created successfully!");
+                println!("Transaction receipt: {:?}", receipt);
+            }
+            Err(e) => {
+                println!("Failed to create token batch: {}", e);
+                return Err(e);
+            }
+        }
+
+        Ok(())
+    }
+
+    // Test function for confirming a token batch
+    async fn test_confirm_token_batch(contract: &impl ContractWriter) -> Result<()> {
+        println!("\n--- Testing confirmTokenBatchIssue ---");
+        println!("WARNING: This will confirm a REAL token batch on the blockchain");
+
+        // Use the latest batch ID from create_token_batch test or specify one
+        // In production you would likely store and retrieve from a database
+        let batch_id = "BATCH1234567890"; // REPLACE WITH AN EXISTING BATCH ID
+
+        println!("Confirming token batch '{}'...", batch_id);
+
+        match contract.confirm_token_batch_issue(batch_id.to_string()).await {
+            Ok(receipt) => {
+                println!("Token batch confirmed successfully!");
+                println!("Transaction receipt: {:?}", receipt);
+            }
+            Err(e) => {
+                println!("Failed to confirm token batch: {}", e);
+                return Err(e);
+            }
+        }
+
+        Ok(())
+    }
+
+    // Test function for purchasing shares
+    async fn test_purchase_shares(contract: &impl ContractWriter) -> Result<()> {
+        println!("\n--- Testing purchaseShares ---");
+        println!("WARNING: This will purchase REAL shares on the blockchain");
+
+        // Use a batch ID from a confirmed batch
+        let batch_id = "BATCH1234567890"; // REPLACE WITH AN EXISTING CONFIRMED BATCH ID
+
+        // Amount to purchase
+        let amount = "1000000000000000000".to_string(); // 1 token unit (adjust as needed)
+
+        println!("Purchasing {} shares from batch '{}'...", amount, batch_id);
+
+        match contract.purchase_shares(batch_id.to_string(), amount).await {
+            Ok(receipt) => {
+                println!("Shares purchased successfully!");
+                println!("Transaction receipt: {:?}", receipt);
+            }
+            Err(e) => {
+                println!("Failed to purchase shares: {}", e);
+                return Err(e);
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_query() -> Result<()> {
+        // 注意：这个测试需要在有真实网络连接和环境配置的情况下运行
+        // 可以通过 cargo test -- --ignored 命令来运行
+        
+        dotenv().ok(); // 确保加载 .env 文件
+        if env::var("PHAROS_RPC_URL").is_err() {
+            println!("跳过测试：环境变量未配置");
+            return Ok(());
+        }
+
+        let contract = initialize_contract_from_env().await?;
+        test_query_invoices(&contract).await
+    }
+
+    #[tokio::test]
+    #[ignore] // 由于会创建真实的链上交易，默认忽略此测试
+    async fn test_create() -> Result<()> {
+        let contract = initialize_contract_from_env().await?;
+        test_batch_create_invoices(&contract).await
+    }
+
+    #[tokio::test]
+    #[ignore] // 由于会创建真实的链上交易，默认忽略此测试
+    async fn test_batch() -> Result<()> {
+        let contract = initialize_contract_from_env().await?;
+        test_create_token_batch(&contract).await
+    }
+
+    #[tokio::test]
+    #[ignore] // 由于会创建真实的链上交易，默认忽略此测试
+    async fn test_confirm() -> Result<()> {
+        let contract = initialize_contract_from_env().await?;
+        test_confirm_token_batch(&contract).await
+    }
+
+    #[tokio::test]
+    #[ignore] // 由于会创建真实的链上交易，默认忽略此测试
+    async fn test_purchase() -> Result<()> {
+        let contract = initialize_contract_from_env().await?;
+        test_purchase_shares(&contract).await
+    }
+}
+
