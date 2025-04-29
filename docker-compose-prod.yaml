@@ -15,7 +15,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - /Users/ksxyh/project/RWA-RBT-backend/config:/app/config
+      - /root/app/config:/app/config
     environment:
       - PHAROS_RPC_URL=https://devnet.dplabs-internal.com
       - INVOICE_CONTRACT_ADDRESS=0x8890386170F6c976Fdb781B757F9b6B66CC0Cf31

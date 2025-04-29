@@ -1,3 +1,5 @@
 [target.x86_64-unknown-linux-gnu]
 linker = "clang" # 推荐使用 clang 作为驱动，并指定 ld 选项
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+[target.x86_64-unknown-linux-musl]
+linker = "x86_64-linux-musl-gcc"

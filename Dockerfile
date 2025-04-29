@@ -5,6 +5,6 @@ FROM ubuntu:latest AS server
 ENV TZ=Asia/Shanghai
 #RUN ln -snf /usr/share/zoneinfo/$TimeZone /etc/localtime && echo $TimeZone > /etc/timezone
 WORKDIR /app
-COPY   ./target/release/api-server ./
+COPY   ./target/x86_64-unknown-linux-musl/release/api-server ./
 ENTRYPOINT ./api-server -e prod
 

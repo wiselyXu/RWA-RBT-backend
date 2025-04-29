@@ -110,8 +110,17 @@ pub fn init_service(
         contract,
     };
 
+    let cors = Cors::new()
+        //.allow_origin("http://192.168.6.60:8080")
+        .allow_origin("*")
+        .allow_methods(vec![Method::GET, Method::POST,Method::PUT, Method::DELETE])
+        .into_handler();
+    //Service::new(router).catcher(Catcher::default().hoop(common_controller::catcher_err)).hoop(cors)
+
+
     // Apply CORS, then injection, then catcher, then router
     Service::new(router)
         .hoop(injector) // Use the injector instance
+        .hoop(cors)
         .catcher(Catcher::default().hoop(common_controller::catcher_err))
 }
