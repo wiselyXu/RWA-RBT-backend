@@ -9,8 +9,6 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-
-
 # Workspace dependencies
 common = { workspace = true }
 configs = { workspace = true }
@@ -31,3 +29,4 @@ chrono = { workspace = true }
 futures = "0.3.31"
 schemars = "0.8"
 regex = "1.11.1"
+anyhow = "1.0.98"

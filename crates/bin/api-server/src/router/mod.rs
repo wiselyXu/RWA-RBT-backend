@@ -94,7 +94,55 @@ pub fn init_router() -> Router {
     );
     router
 }
+use std::sync::Arc;
+use salvo::{Router, prelude::*};
+use service::{db::init_mongodb, invoice::InvoiceService, cache::init_redis_client}; 
+use crate::handler::InvoiceHandler;
+use crate::middleware::auth::token_validator;
 
+pub fn create_router(db_url: &str, redis_config: &config::redis::Redis) -> Result<Router, Box<dyn std::error::Error>> {
+    // 初始化MongoDB
+    let db = init_mongodb(db_url)?;
+    
+    // 初始化Redis客户端
+    let redis_client = init_redis_client(redis_config)?;
+    
+    // 创建服务实例
+    let invoice_service = Arc::new(InvoiceService::new(db, redis_client));
+    
+    // 创建处理器
+    let invoice_handler = InvoiceHandler::new(invoice_service.clone());
+    
+    // 设置定时任务
+    service::invoice::setup_scheduled_tasks(invoice_service);
+    
+    // 创建路由
+    let router = Router::new()
+        // 公开API（无需身份验证）
+        .push(
+            Router::with_path("api/v1/invoices/available")
+                .get(invoice_handler.get_available_invoices)
+        )
+        // 需要身份验证的API
+        .push(
+            Router::with_path("api/v1")
+                .hoop(token_validator)
+                .push(
+                    Router::with_path("invoices/purchase")
+                        .post(invoice_handler.purchase_invoice)
+                )
+                .push(
+                    Router::with_path("holdings")
+                        .get(invoice_handler.get_user_holdings)
+                )
+                .push(
+                    Router::with_path("holdings/<holdingId>/interest")
+                        .get(invoice_handler.get_holding_interest_details)
+                )
+        );
+    
+    Ok(router)
+}
 // Modify init_service to accept contract connection
 pub fn init_service(
     mongodb: Arc<Database>, 

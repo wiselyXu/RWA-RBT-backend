@@ -18,3 +18,11 @@ pub use invoice_batch::{InvoiceBatch, InvoiceBatchStatus};
 pub use rbt_holding::RbtHolding;
 pub use repayment::Repayment;
 pub use settlement_nft::SettlementNft;
+pub mod invoice_status;
+pub mod user_invoice_holding;
+pub mod daily_interest_accrual;
+pub mod transaction;
+
+pub use user_invoice_holding::{UserInvoiceHolding, HoldingStatus};
+pub use daily_interest_accrual::DailyInterestAccrual;
+pub use transaction::{Transaction, TransactionType};

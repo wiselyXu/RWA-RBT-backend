@@ -3,6 +3,7 @@ pub mod swagger_controller;
 pub mod user_controller;
 pub mod enterprise_controller;
 pub mod invoice_controller;
+pub mod purchase_controller;
 
 use serde::{Deserialize, Serialize};
 

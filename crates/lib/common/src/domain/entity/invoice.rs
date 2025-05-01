@@ -41,12 +41,15 @@ pub struct Invoice {
 
 #[derive(Debug, Clone, Serialize, Deserialize,ToSchema)]
 pub enum InvoiceStatus {
-    Pending,    // Created in DB, potentially not on chain yet
-    Verified,   // Potentially corresponds to on-chain validity
-    Packaged,   // Included in an InvoiceBatch
-    Repaid,     // Corresponds to on-chain clearance
-    Overdue,
-    Defaulted,
+    Pending,    // 已创建在数据库中，可能尚未上链
+    Verified,   // 可能对应于链上的有效性验证
+    Packaged,   // 已包含在发票批次中
+    Repaid,     // 对应于链上的清算状态
+    Overdue,    // 已逾期
+    Defaulted,  // 已违约
+
+    OnSale,
+    SoldOut,
 }
 
 // Helper methods

@@ -2,7 +2,6 @@ use salvo::prelude::ToSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-/// Data Transfer Object for Query Parameters. Uses Option for optional filtering.
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize,ToSchema)]
 #[salvo(schema(example = json!({

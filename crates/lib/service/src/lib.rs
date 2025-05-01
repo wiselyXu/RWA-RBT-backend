@@ -1,12 +1,12 @@
 #![allow(warnings)]
 pub mod db;
-pub mod cache;
-pub mod error;
 pub mod repository;
-
+pub mod invoice;
+pub mod cache;
+pub mod service;
+pub mod error;
 // Re-export key items for easier access from other crates
 pub use db::{create_indexes, init_mongodb};
-pub use cache::init_redis_client;
 pub use error::ServiceError;
 pub use repository::{EnterpriseRepository, InvoiceRepository, UserRepository};
 
