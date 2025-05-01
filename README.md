@@ -1,80 +1,109 @@
-# [RWA-RBT-backend]
+# RWA-RBT 后端
 
-## 🎯 核心目标与领域
+## 项目概览
 
-本服务专注于 **真实世界资产 (RWA)** 领域，旨在提供一个安全、可靠且高效的后端基础设施，以支持：
+RWA-RBT（真实世界资产-应收票据代币化）平台是一个基于区块链的解决方案，用于数字化和代币化企业应收账款。该平台使企业能够将其应收账款转换为可交易的数字资产，为债权人创造流动性，同时提供由实体资产支持的投资机会。
 
-*   RWA 的数字化表示和管理。
-*   与 RWA 相关的智能合约交互（例如，发行、交易、赎回）。
-*   为前端应用或其他服务提供 RWA 数据的 API 接口。
-*   处理与 RWA 相关的链上事件和数据同步。
+## 业务功能
 
-## ✨ 特性
+### 核心特性
 
-*   **高性能 API:** 使用 [Salvo](https://salvo.rs/) 框架构建的异步 RESTful API。
-*   **区块链交互:** 集成 [ethers-rs](https://github.com/gakonst/ethers-rs) 库，用于：
-    *   连接以太坊节点 (JSON-RPC)。
-    *   读取智能合约状态。
-    *   构建和发送交易。
-    *   监听链上事件。
-*   **类型安全:** 利用 Rust 的强类型系统确保代码健壮性。
-*   **异步处理:** 基于 [Tokio](https://tokio.rs/) 构建，充分利用异步 I/O 处理高并发请求。
-*   **配置灵活:** 通过环境变量或配置文件进行服务配置。
-*   **(可选) 数据持久化:** [如果使用了数据库，请在此处添加说明，例如：使用 SQLx 与 PostgreSQL 进行数据存储。]
+- **资产代币化**：将真实世界金融资产（应收账款）转换为区块链代币
+- **投资平台**：允许投资者购买应收票据的部分所有权
+- **票据管理**：跟踪、验证和管理票据生命周期
+- **利息计算**：计算并向代币持有者分配利息
+- **结算系统**：处理从债务人到投资者的还款
 
-## 🛠️ 技术栈
+### 主要参与方
 
-*   **语言:** [Rust](https://www.rust-lang.org/) (请指定版本，例如：1.7x)
-*   **Web 框架:** [Salvo](https://salvo.rs/)
-*   **Web3 库:** [ethers-rs](https://github.com/gakonst/ethers-rs)
-*   **异步运行时:** [Tokio](https://tokio.rs/)
-*   **序列化/反序列化:** [Serde](https://serde.rs/)
-*   **构建工具与包管理器:** [Cargo](https://doc.rust-lang.org/cargo/)
-*   **(可选) 数据库交互:** [例如：SQLx, Diesel]
-*   **(可选) 日志:** [例如：tracing, log]
+- **债权人**：持有应收票据并寻求流动性的企业
+- **债务人**：具有支付义务的企业
+- **投资者**：购买代币化应收票据的实体
+- **平台**：用于代币发行和交易的技术基础设施
 
-## 🚀 快速开始
+### 核心流程
 
-### 前提条件
+1. **企业入驻与认证**：企业注册和验证
+2. **票据登记**：上传和验证应收单据
+3. **代币发行**：打包票据并铸造RBT代币
+4. **市场交易**：投资者购买RBT代币
+5. **利息分配**：自动计算和分配利息
+6. **债务人还款**：处理支付和代币赎回
+7. **结算与记录**：生命周期完成和报告
 
-*   安装 [Rust 工具链](https://rustup.rs/) (包含 `rustc` 和 `cargo`)。
-*   (可选) [数据库实例，例如 PostgreSQL, MySQL]，如果项目需要。
-*   访问一个以太坊兼容的节点 (例如 Alchemy, Infura, 或本地节点) 的 JSON-RPC URL。
+## 技术栈
 
-### 安装
+### 后端
+- **语言**：Rust
+- **Web框架**：Salvo
+- **数据库**：MongoDB
+- **缓存**：Redis
+- **区块链交互**：ethers-rs
 
-1.  克隆仓库:
-    ```bash
-    git clone <your-repository-url>
-    cd <your-project-directory>
-    ```
-2.  (可选) 如果项目依赖特定的 Rust 工具链版本，请设置：
-    ```bash
-    # rust-toolchain.toml 文件通常会自动处理
-    # 或者手动设置: rustup override set <version>
-    ```
+### 区块链
+- **平台**：Pharos Chain
+- **智能合约语言**：Rust（使用Stylus SDK）
+- **文件存储**：IPFS（用于票据文档）
 
-### 配置
+### 架构
+- **API优先设计**：所有功能的RESTful端点
+- **服务导向**：具有明确职责的模块化服务
+- **区块链集成**：直接合约交互进行链上操作
+- **认证**：基于JWT，使用Web3钱包签名
 
-服务通常需要通过环境变量或配置文件 (`config.toml`, `.env` 等) 进行配置。请创建一个配置文件（例如 `.env`）并填入必要信息：
+## 项目结构
 
-```dotenv
-# 服务监听地址和端口
-SERVER_ADDRESS=0.0.0.0:8000
+```
+crates/
+├── bin/
+│   └── api-server/       # 主API服务器实现
+│       ├── controller/   # API端点处理器
+│       ├── router/       # API路由定义
+│       ├── utils/        # 辅助工具
+│       └── main.rs       # 应用程序入口点
+├── common/               # 共享代码和领域模型
+└── service/              # 业务逻辑和服务
+```
 
-# 区块链配置
-RPC_URL=您的节点JSON-RPC_URL
-CHAIN_ID=区块链的ChainID
-# 重要：切勿将真实私钥硬编码或提交到版本控制！
-# 建议使用硬件钱包、KMS 或其他安全方式管理私钥。
-# 此处仅为示例，实际应从安全源加载。
-SIGNER_PRIVATE_KEY=0x...您的钱包私钥(仅供本地测试，极不安全)
+## 快速开始
 
-# RWA 相关合约地址
-RWA_ASSET_CONTRACT_ADDRESS=0x...资产合约地址
-RWA_MANAGER_CONTRACT_ADDRESS=0x...管理合约地址
+1. **前提条件**:
+   - Rust工具链
+   - MongoDB实例
+   - Redis服务器
+   - 以太坊兼容节点访问
 
-# (可选) 数据库连接字符串
-# DATABASE_URL=postgres://user:password@host:port/database
+2. **配置**:
+   创建`.env`文件，包含:
+   ```
+   RPC_URL=<区块链-rpc-端点>
+   CONTRACT_ADDRESS=<已部署合约地址>
+   PRIVATE_KEY=<钱包私钥>
+   ```
 
-# 其他必要的配置...
+3. **构建和运行**:
+   ```
+   cargo build
+   cargo run
+   ```
+
+## API端点
+
+- `/user`: 用户认证和管理
+- `/enterprise`: 企业注册和管理
+- `/invoice`: 票据CRUD操作
+- `/rwa`: RWA特定操作，包括:
+  - 可供投资的票据
+  - 票据购买端点
+  - 投资持仓信息
+
+## 未来发展
+
+- 增强风险评估机制
+- 多币种支持
+- RBT二级市场交易
+- 与DeFi协议集成以优化收益
+
+cargo stylus deploy --endpoint  https://devnet.dplabs-internal.com --private-key 0fbea5137261a5af747cdcdb9799bef06476eac225de4d818120bcfd7e096c14 
+ 
+

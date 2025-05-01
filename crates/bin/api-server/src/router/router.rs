@@ -48,6 +48,6 @@ pub fn init_purchase_router() -> Router {
                 .hoop(common_controller::auth_token)
                 .push(Router::with_path("/invoices/purchase").post(purchase_controller::purchase_invoice))
                 .push(Router::with_path("/holdings").get(purchase_controller::list_my_holdings))
-                .push(Router::with_path("/holdings/<holdingId>/interest").get(invoice_controller::get_holding_interest_details))
+            
         )
 }
