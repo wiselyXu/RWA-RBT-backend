@@ -40,22 +40,15 @@ async fn daily_interest_calculation_task(invoice_service: Arc<InvoiceService>) {
         info!("开始计算 {} 的每日利息", yesterday);
         
         // 执行计息任务
-        match invoice_service.calculate_daily_interest(yesterday).await {
-            Ok((success_count, skipped_count, errors)) => {
+        match invoice_service.calculate_daily_interest_for_date(yesterday).await {
+            Ok(success_count) => {
                 info!(
-                    "计息任务完成: 成功处理 {} 条持仓记录, 跳过 {} 条", 
-                    success_count, skipped_count
+                    "计息任务完成: 成功处理 {} 条持仓记录", 
+                    success_count
                 );
-                
-                if !errors.is_empty() {
-                    error!("计息任务出现 {} 个错误:", errors.len());
-                    for (i, err) in errors.iter().enumerate() {
-                        error!("  错误 {}: {}", i + 1, err);
-                    }
-                }
             },
             Err(e) => {
-                error!("执行计息任务失败: {}", e);
+                error!("执行计息任务失败: {:?}", e);
             }
         }
         
@@ -91,19 +84,12 @@ async fn maturity_payment_task(invoice_service: Arc<InvoiceService>) {
         info!("开始处理 {} 到期的票据", today);
         
         // 执行到期兑付任务
-        match invoice_service.process_maturing_invoices(today).await {
-            Ok((success_count, errors)) => {
+        match invoice_service.process_maturity_payments_for_date(today).await {
+            Ok(success_count) => {
                 info!("到期兑付任务完成: 成功处理 {} 条持仓记录", success_count);
-                
-                if !errors.is_empty() {
-                    error!("到期兑付任务出现 {} 个错误:", errors.len());
-                    for (i, err) in errors.iter().enumerate() {
-                        error!("  错误 {}: {}", i + 1, err);
-                    }
-                }
             },
             Err(e) => {
-                error!("执行到期兑付任务失败: {}", e);
+                error!("执行到期兑付任务失败: {:?}", e);
             }
         }
         

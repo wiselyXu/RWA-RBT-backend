@@ -1,12 +1,14 @@
 use mongodb::{
     bson::{doc, DateTime, Decimal128, oid::ObjectId},
-    Collection, Database,
+    Collection, Database, ClientSession,
     options::FindOptions,
+    results::InsertOneResult,
 };
 use anyhow::{Result, anyhow};
 use common::domain::entity::DailyInterestAccrual;
 use futures::TryStreamExt;
 use chrono::NaiveDate;
+use crate::error::ServiceError;
 
 pub struct DailyInterestAccrualRepository {
     collection: Collection<DailyInterestAccrual>,
@@ -23,6 +25,15 @@ impl DailyInterestAccrualRepository {
     pub async fn create(&self, accrual: DailyInterestAccrual) -> Result<DailyInterestAccrual> {
         let mut accrual = accrual;
         let result = self.collection.insert_one(&accrual).await?;
+        accrual.id = Some(result.inserted_id.as_object_id().unwrap());
+        Ok(accrual)
+    }
+    
+    // 创建每日利息记录 within a transaction session
+    pub async fn create_session(&self, accrual: DailyInterestAccrual, session: &mut ClientSession) -> Result<DailyInterestAccrual, ServiceError> {
+        let mut accrual = accrual;
+        let result: InsertOneResult = self.collection.insert_one(&accrual).session(session).await
+            .map_err(|e| ServiceError::MongoDbError(e.to_string()))?;
         accrual.id = Some(result.inserted_id.as_object_id().unwrap());
         Ok(accrual)
     }

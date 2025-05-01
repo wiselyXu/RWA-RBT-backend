@@ -1,12 +1,8 @@
-use mongodb::{
-    bson::{doc, DateTime, Decimal128, oid::ObjectId},
-    Collection, Database, ClientSession,
-    options::FindOptions,
-};
+use mongodb::{bson::{doc, DateTime, Decimal128, oid::ObjectId, Bson}, Collection, Database, ClientSession, options::{FindOptions, UpdateOptions}, bson};
 use anyhow::{Result, anyhow};
 use common::domain::entity::{UserInvoiceHolding, HoldingStatus};
-use futures::TryStreamExt;
-use chrono::{Utc, NaiveDate};
+use futures::stream::{StreamExt, TryStreamExt};
+use chrono::{Utc, NaiveDate, TimeZone};
 use crate::error::ServiceError;
 
 pub struct UserInvoiceHoldingRepository {
@@ -31,11 +27,9 @@ impl UserInvoiceHoldingRepository {
     // 创建新的持仓记录 within a transaction session
     pub async fn create_session(&self, holding: UserInvoiceHolding, session: &mut ClientSession) -> Result<UserInvoiceHolding, ServiceError> {
         let mut holding = holding;
-        // Note: insert_one_with_session doesn't take options like returning the document directly.
-        // We insert and rely on the input `holding` struct (which has the holding_id already generated).
-        // The _id (database id) is set after insertion if needed elsewhere.
-        let result = self.collection.insert_one_with_session(&holding, None, session).await
-            .map_err(|e| ServiceError::MongoDbError(e.into()))?;
+        // Use .insert_one().session()
+        let result = self.collection.insert_one(&holding).session(session).await
+            .map_err(|e| ServiceError::MongoDbError(e.to_string()))?;
         holding.id = Some(result.inserted_id.as_object_id().unwrap()); // Assign the MongoDB generated _id
         Ok(holding) // Return the original holding struct, now with the db id
     }
@@ -95,7 +89,7 @@ impl UserInvoiceHoldingRepository {
         let filter = doc! { "holding_id": holding_id };
         let update = doc! {
             "$set": { 
-                "holding_status": status,
+                "holding_status": bson::to_bson(&status).map_err(|e| ServiceError::SerializationError(e.to_string()))?,
                 "updated_at": DateTime::now(),
             }
         };
@@ -104,11 +98,60 @@ impl UserInvoiceHoldingRepository {
         Ok(())
     }
     
+    // 更新累计利息和最后计息日期 within a transaction session
+    pub async fn update_accrued_interest_session(
+        &self,
+        holding_id: &str,
+        additional_interest: Decimal128,
+        accrual_date: DateTime,
+        session: &mut ClientSession,
+    ) -> Result<(), ServiceError> {
+        let filter = doc! { "holding_id": holding_id };
+        let update = doc! {
+            "$inc": { "total_accrued_interest": additional_interest },
+            "$set": { 
+                "last_accrual_date": accrual_date,
+                "updated_at": DateTime::now(),
+            }
+        };
+        
+        self.collection.update_one(filter, update).session(session).await
+            .map_err(|e| ServiceError::MongoDbError(e.to_string()))?;
+        Ok(())
+    }
+    
+    // 更新持仓状态（例如到期）within a transaction session
+    pub async fn update_holding_status_session(
+        &self,
+        holding_id: &str,
+        status: HoldingStatus,
+        session: &mut ClientSession,
+    ) -> Result<(), ServiceError> {
+        let filter = doc! { "holding_id": holding_id };
+        let update = doc! {
+            "$set": { 
+                "holding_status": bson::to_bson(&status).map_err(|e| ServiceError::SerializationError(e.to_string()))?,
+                "updated_at": DateTime::now(),
+            }
+        };
+        
+        self.collection.update_one(filter, update).session(session).await
+             .map_err(|e| ServiceError::MongoDbError(e.to_string()))?;
+        Ok(())
+    }
+    
     // 查询到期日为指定日期的活跃持仓
     pub async fn find_maturing_holdings(&self, maturity_date: NaiveDate) -> Result<Vec<UserInvoiceHolding>> {
         // 需要与Invoice集合做关联查询，这里使用聚合管道
-        let start_of_day = DateTime::from_chrono(maturity_date.and_hms_opt(0, 0, 0).unwrap().naive_utc());
-        let end_of_day = DateTime::from_chrono(maturity_date.and_hms_opt(23, 59, 59).unwrap().naive_utc());
+        // Convert NaiveDate to bson::DateTime via chrono::DateTime<Utc> and millis
+        let start_of_day_naive = maturity_date.and_hms_opt(0, 0, 0).unwrap();
+        let end_of_day_naive = maturity_date.and_hms_opt(23, 59, 59).unwrap();
+
+        let start_of_day_utc = Utc.from_utc_datetime(&start_of_day_naive);
+        let end_of_day_utc = Utc.from_utc_datetime(&end_of_day_naive);
+
+        let start_of_day = DateTime::from_millis(start_of_day_utc.timestamp_millis());
+        let end_of_day = DateTime::from_millis(end_of_day_utc.timestamp_millis());
         
         let pipeline = vec![
             doc! {
@@ -136,7 +179,20 @@ impl UserInvoiceHoldingRepository {
         ];
         
         let cursor = self.collection.aggregate(pipeline).await?;
-        let results = cursor.try_collect().await?;
+        // Collect documents first, then deserialize
+        let docs: Vec<bson::Document> = cursor.try_collect().await?;
+        let mut results = Vec::new();
+        for doc in docs {
+            match bson::from_document(doc) {
+                Ok(holding) => results.push(holding),
+                Err(e) => {
+                    // Log or handle deserialization error for individual documents
+                    eprintln!("Failed to deserialize holding from aggregation: {}", e); 
+                    // Depending on requirements, you might return an error or just skip the doc
+                    // return Err(anyhow!("Failed to deserialize holding: {}", e));
+                }
+            }
+        }
         
         Ok(results)
     }

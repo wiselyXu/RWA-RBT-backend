@@ -1,9 +1,11 @@
+use std::str::FromStr;
 use mongodb::{Database, bson::{doc, Decimal128, oid::ObjectId}};
 use anyhow::{Result, anyhow};
-use chrono::{Utc, NaiveDate, Duration};
+use chrono::{Utc, NaiveDate, Duration, Datelike, TimeZone};
 use crate::{
    
     repository::{
+        UserRepository,
         UserInvoiceHoldingRepository,
         DailyInterestAccrualRepository,
         TransactionRepository,
@@ -15,6 +17,7 @@ use common::domain::{
         Transaction,
         DailyInterestAccrual,
         HoldingStatus,
+        TransactionType,
     },
     dto::{
 
@@ -26,10 +29,24 @@ use common::domain::{
 use redis::Client as RedisClient;
 use common::domain::dto::invoice_redis_dto::InvoiceRedisDto;
 use crate::cache::InvoiceRedisService;
+use futures::TryStreamExt;
+use log::{error, info, warn};
+use mongodb::options::{FindOneAndUpdateOptions, ReturnDocument};
+use mongodb::{ClientSession, Collection};
+use std::collections::HashMap;
+use std::sync::Arc;
+use mongodb::bson::DateTime;
+use crate::error::ServiceError;
+use mongodb::error::Error as MongoError;
+use futures::FutureExt;
+use rust_decimal::Decimal;
+use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
+use rust_decimal_macros::dec;
 
 pub struct InvoiceService {
     db: Database,
     invoice_redis_service: InvoiceRedisService,
+    user_repo: UserRepository,
     user_holding_repo: UserInvoiceHoldingRepository,
     interest_accrual_repo: DailyInterestAccrualRepository,
     transaction_repo: TransactionRepository,
@@ -38,6 +55,7 @@ pub struct InvoiceService {
 impl InvoiceService {
     pub fn new(db: Database, redis_client: RedisClient) -> Self {
         Self {
+            user_repo: UserRepository::new(&db),
             user_holding_repo: UserInvoiceHoldingRepository::new(&db),
             interest_accrual_repo: DailyInterestAccrualRepository::new(&db),
             transaction_repo: TransactionRepository::new(&db),
@@ -47,7 +65,7 @@ impl InvoiceService {
     }
     
     // 获取所有可购买的票据
-    pub async fn get_available_invoices(&self) -> Result<Vec<InvoiceRedisDto>> {
+    pub async fn get_available_invoices(&self) -> Result<Vec<InvoiceRedisDto>, ServiceError> {
         self.invoice_redis_service.get_available_invoices()
     }
     
@@ -55,7 +73,7 @@ impl InvoiceService {
     pub async fn purchase_invoice(&self, user_id: &str, purchase_req: PurchaseInvoiceDto) -> Result<String> {
         // 验证票据是否可购买
         let invoice_id = &purchase_req.invoice_id;
-        let shares = purchase_req.shares;
+        let purchase_amount_f64 = purchase_req.purchase_amount;
         
         let invoice = self.invoice_redis_service.get_invoice(invoice_id)?
             .ok_or_else(|| anyhow!("票据不存在"))?;
@@ -64,20 +82,37 @@ impl InvoiceService {
             return Err(anyhow!("票据当前不可购买"));
         }
         
-        if shares == 0 {
-            return Err(anyhow!("购买份数不能为0"));
+        // Calculate shares and validate amount/shares (using rust_decimal)
+        let purchase_amount_dec = Decimal::from_f64(purchase_amount_f64)
+            .ok_or_else(|| anyhow!("无效的购买金额格式"))?;
+        let share_price_dec = Decimal::from_f64(invoice.share_price)
+             .ok_or_else(|| anyhow!("无效的 Redis 份额价格格式"))?;
+        let zero_dec = dec!(0.0);
+        let one_dec = dec!(1.0);
+
+        if purchase_amount_dec <= zero_dec || share_price_dec <= zero_dec {
+             return Err(anyhow!("购买金额和份额价格必须为正"));
         }
-        
-        if shares > invoice.available_shares {
-            return Err(anyhow!("购买份数超过可用份数"));
+
+        let calculated_shares_dec = (purchase_amount_dec / share_price_dec).round();
+        let calculated_shares = calculated_shares_dec.to_u64()
+             .ok_or_else(|| anyhow!("计算出的份额无效"))?;
+
+        let actual_purchase_amount_dec = calculated_shares_dec * share_price_dec;
+        let actual_purchase_decimal128 = Decimal128::from_str(&actual_purchase_amount_dec.to_string())
+            .map_err(|e| anyhow!("无法转换最终购买金额: {}", e))?;
+
+        if calculated_shares == 0 {
+            return Err(anyhow!("购买金额太小，无法购买任何份额"));
         }
-        
-        // 计算购买金额
-        let purchase_amount = Decimal128::from_string(&format!("{}", shares as f64 * invoice.share_price))?;
+
+        if calculated_shares > invoice.available_shares {
+            return Err(anyhow!("购买份数 ({}) 超过可用份数 ({})", calculated_shares, invoice.available_shares));
+        }
         
         // 开始事务
-        let mut session = self.db.client().start_session(None).await?;
-        session.start_transaction(None).await?;
+        let mut session = self.db.client().start_session().await?;
+        session.start_transaction().await?;
         
         let obj_invoice_id = ObjectId::parse_str(invoice_id)?;
         
@@ -85,23 +120,23 @@ impl InvoiceService {
         let holding = UserInvoiceHolding::new(
             user_id.to_string(),
             obj_invoice_id,
-            purchase_amount
+            actual_purchase_decimal128.clone()
         );
         
-        let holding = self.user_holding_repo.create(holding).await?;
+        let holding = self.user_holding_repo.create_session(holding, &mut session).await?;
         
         // 2. 记录交易
         let transaction = Transaction::new_purchase(
             user_id.to_string(),
             obj_invoice_id,
             holding.holding_id.clone(),
-            purchase_amount
+            actual_purchase_decimal128.clone()
         );
         
-        self.transaction_repo.create(transaction).await?;
+        self.transaction_repo.create_session(transaction, &mut session).await?;
         
         // 3. 更新Redis中的票据可用份数
-        self.invoice_redis_service.update_invoice_shares(invoice_id, shares)?;
+        self.invoice_redis_service.update_invoice_shares(invoice_id, calculated_shares)?;
         
         // 提交事务
         session.commit_transaction().await?;
@@ -118,6 +153,7 @@ impl InvoiceService {
             if let Some(invoice) = self.invoice_redis_service.get_invoice(&holding.invoice_id.to_hex())? {
                 let holding_dto = HoldingDto {
                     holding_id: holding.holding_id.clone(),
+                    user_id: holding.user_id.clone(),
                     invoice_id: holding.invoice_id.to_hex(),
                     invoice_number: invoice.invoice_number,
                     title: invoice.title,
@@ -165,159 +201,257 @@ impl InvoiceService {
         Ok(details)
     }
     
-    // 计算指定日期的所有持仓利息（定时任务使用）
-    pub async fn calculate_daily_interest(&self, accrual_date: NaiveDate) -> Result<(usize, usize, Vec<String>)> {
-        let active_holdings = self.user_holding_repo.find_active_holdings().await?;
+    // Renamed from process_daily_interest_accrual to match original intent
+    pub async fn calculate_daily_interest_for_date(&self, accrual_date: NaiveDate) -> Result<u32, ServiceError> {
+        info!("Processing daily interest accrual for date: {}", accrual_date);
         
-        let mut success_count = 0;
-        let mut skipped_count = 0;
-        let mut errors = Vec::new();
-        
-        let accrual_datetime = mongodb::bson::DateTime::from_chrono(
-            accrual_date.and_hms_opt(0, 0, 0).unwrap().naive_utc()
-        );
-        
+        // Convert NaiveDate to BSON DateTime
+        let start_of_day_naive = accrual_date.and_hms_opt(0, 0, 0).unwrap();
+        let start_of_day_utc = Utc.from_utc_datetime(&start_of_day_naive);
+        let accrual_datetime = DateTime::from_millis(start_of_day_utc.timestamp_millis());
+
+        // Find all active holdings
+        let active_holdings = self.user_holding_repo.find_active_holdings().await
+            .map_err(|e| ServiceError::MongoDbError(e.to_string()))?; 
+
+        let mut success_count = 0; 
+        // Loop through each active holding
         for holding in active_holdings {
-            match self.calculate_holding_interest(&holding, accrual_datetime).await {
-                Ok(true) => success_count += 1,
-                Ok(false) => skipped_count += 1,
-                Err(e) => {
-                    let error_msg = format!(
-                        "计算利息失败: 持仓ID={}, 用户ID={}, 错误={}", 
-                        holding.holding_id, holding.user_id, e
-                    );
-                    errors.push(error_msg);
-                }
+            let holding_id_str = holding.holding_id.clone(); 
+
+            // --- Idempotency Check (outside transaction) --- 
+            let already_accrued = self.interest_accrual_repo.has_accrual(&holding_id_str, accrual_datetime).await
+                 .map_err(|e| ServiceError::MongoDbError(e.to_string()))?;
+            if already_accrued {
+                warn!("Interest already accrued for holding {} on {}. Skipping.", holding_id_str, accrual_date);
+                continue;
             }
-        }
-        
-        Ok((success_count, skipped_count, errors))
-    }
-    
-    // 计算单个持仓的利息
-    async fn calculate_holding_interest(&self, holding: &UserInvoiceHolding, accrual_date: mongodb::bson::DateTime) -> Result<bool> {
-        // 检查持仓状态
-        if !matches!(holding.holding_status, HoldingStatus::Active) {
-            return Ok(false); // 跳过非活跃持仓
-        }
-        
-        // 获取票据信息
-        let invoice = self.invoice_redis_service.get_invoice(&holding.invoice_id.to_hex())?
-            .ok_or_else(|| anyhow!("票据信息不存在"))?;
             
-        // 检查当前计算日期是否在计息区间内
-        let accrual_naive_date = NaiveDate::from_ymd_opt(
-            accrual_date.timestamp_millis() as i32 / 1000 / 86400 + 1970, 
-            1, 
-            1
-        ).unwrap() + Duration::days(
-            accrual_date.timestamp_millis() as i64 / 1000 / 86400 - (1970 * 365)
-        );
-        
-        if accrual_naive_date < invoice.issue_date || accrual_naive_date >= invoice.maturity_date {
-            return Ok(false); // 不在计息区间内
-        }
-        
-        // 检查是否已经计算过该日期的利息（幂等性）
-        if accrual_date.timestamp_millis() <= holding.last_accrual_date.timestamp_millis() {
-            return Ok(false); // 已计算过
-        }
-        
-        // 检查是否已存在该日期的利息记录
-        let already_has_accrual = self.interest_accrual_repo.has_accrual(&holding.holding_id, accrual_date).await?;
-        if already_has_accrual {
-            return Ok(false); // 已有记录
-        }
-        
-        // 计算日利息
-        let is_leap_year = accrual_naive_date.year() % 4 == 0 && 
-                          (accrual_naive_date.year() % 100 != 0 || accrual_naive_date.year() % 400 == 0);
-        
-        let daily_rate = invoice.calculate_daily_rate(is_leap_year);
-        let current_balance_f64 = holding.current_balance.to_string().parse::<f64>()?;
-        let daily_interest = current_balance_f64 * daily_rate;
-        
-        let daily_interest_decimal = Decimal128::from_string(&format!("{:.8}", daily_interest))?;
-        
-        // 创建利息记录
-        let accrual = DailyInterestAccrual::new(
-            holding.user_id.clone(),
-            holding.invoice_id,
-            holding.holding_id.clone(),
-            accrual_date,
-            daily_interest_decimal
-        );
-        
-        self.interest_accrual_repo.create(accrual).await?;
-        
-        // 更新持仓记录中的累计利息和最后计息日期
-        self.user_holding_repo.update_accrued_interest(
-            &holding.holding_id,
-            daily_interest_decimal,
-            accrual_date
-        ).await?;
-        
-        Ok(true)
-    }
-    
-    // 处理到期票据
-    pub async fn process_maturing_invoices(&self, maturity_date: NaiveDate) -> Result<(usize, Vec<String>)> {
-        let maturity_holdings = self.user_holding_repo.find_maturing_holdings(maturity_date).await?;
-        
-        let mut success_count = 0;
-        let mut errors = Vec::new();
-        
-        for holding in maturity_holdings {
-            match self.process_maturity_payment(&holding).await {
-                Ok(_) => success_count += 1,
+            // Get invoice details (needed for rate calculation, can be outside transaction)
+            // Using Redis cache for efficiency
+             let invoice = match self.invoice_redis_service.get_invoice(&holding.invoice_id.to_hex()) {
+                 Ok(Some(inv)) => inv,
+                 Ok(None) => {
+                     error!("Invoice info not found in Redis for holding {}. Cannot calculate interest.", holding_id_str);
+                     continue; // Skip this holding
+                 }
+                 Err(e) => {
+                    error!("Failed to get invoice {} from Redis for holding {}: {}. Skipping.", holding.invoice_id.to_hex(), holding_id_str, e);
+                    continue; // Skip this holding
+                 }
+             };
+
+            // --- Date Range Check --- 
+            // Convert BSON accrual_datetime back to NaiveDate for comparison
+            // Need a utility function or manual conversion here
+            let accrual_naive_date = { 
+                let millis = accrual_datetime.timestamp_millis();
+                let naive = chrono::NaiveDateTime::from_timestamp_millis(millis).unwrap();
+                 Utc.from_utc_datetime(&naive).date_naive()
+             }; // Get NaiveDate
+
+            if accrual_naive_date < invoice.issue_date || accrual_naive_date >= invoice.maturity_date {
+                warn!("Skipping holding {} as accrual date {} is outside interest period ({}-{}).", 
+                       holding_id_str, accrual_naive_date, invoice.issue_date, invoice.maturity_date);
+                continue;
+            }
+
+            // --- Calculate Interest (outside transaction) --- 
+            let is_leap_year = accrual_naive_date.year() % 4 == 0 && (accrual_naive_date.year() % 100 != 0 || accrual_naive_date.year() % 400 == 0);
+            let days_in_year = if is_leap_year { 366.0 } else { 365.0 };
+            let annual_rate = invoice.annual_rate; 
+            let daily_rate = annual_rate / days_in_year / 100.0; 
+            let principal = holding.current_balance; 
+            let principal_f64 = principal.to_string().parse::<f64>().unwrap_or(0.0); // Handle potential parse error better?
+            let daily_interest_f64 = principal_f64 * daily_rate;
+            let daily_interest_decimal = match Decimal128::from_str(&format!("{:.8}", daily_interest_f64)) {
+                Ok(d) => d,
                 Err(e) => {
-                    let error_msg = format!(
-                        "处理到期兑付失败: 持仓ID={}, 用户ID={}, 错误={}", 
-                        holding.holding_id, holding.user_id, e
-                    );
-                    errors.push(error_msg);
+                    error!("Failed to parse daily interest '{}' for holding {}: {}. Skipping.", daily_interest_f64, holding_id_str, e);
+                    continue;
+                }
+            };
+            
+            // --- Start Transaction per Holding --- 
+            let mut session = match self.db.client().start_session().await {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("Failed to start session for holding {}: {}. Skipping.", holding_id_str, e);
+                    continue;
+                }
+            };
+            let transaction_result = session.start_transaction()
+                .and_run(
+                    (self, &holding, accrual_datetime, daily_interest_decimal.clone()), // Clone interest decimal
+                    |session, (service, h, date, interest)| {
+                        async move { 
+                            // a. Create DailyInterestAccrual record
+                            let accrual = DailyInterestAccrual::new(
+                                h.user_id.clone(),
+                                h.invoice_id,
+                                h.holding_id.clone(),
+                                date.clone(), 
+                                interest.clone(),
+                            );
+                            service.interest_accrual_repo.create_session(accrual, session).await?; 
+
+                            // b. Update holding's total_accrued_interest and last_accrual_date
+                            service.user_holding_repo.update_accrued_interest_session(
+                                &h.holding_id,
+                                interest.clone(),
+                                date.clone(), 
+                                session
+                            ).await?;
+
+                            // c. Create InterestAccrual transaction record
+                            let transaction = Transaction::new( 
+                                h.user_id.clone(),
+                                h.invoice_id,
+                                h.holding_id.clone(),
+                                TransactionType::InterestAccrual, 
+                                interest.clone(),
+                            );
+                            service.transaction_repo.create_session(transaction, session).await?;
+                            
+                            Ok(())
+                        }
+                        .map(|res| res.map_err(|service_err: ServiceError| {
+                            MongoError::custom(Box::new(service_err))
+                        }))
+                       .boxed()
+                    }
+                ).await;
+
+            match transaction_result {
+                Ok(_) => {
+                    success_count += 1;
+                    info!("Successfully accrued interest for holding {}", holding_id_str);
+                }
+                Err(e) => {
+                    error!("Failed transaction for interest accrual on holding {}: {:?}", holding_id_str, e);
+                    // Optionally try to decode the custom error if needed for specific logging
+                    if let MongoError { kind: ref error_kind, .. } = e {
+                        if let mongodb::error::ErrorKind::Custom(inner_error) = &**error_kind {
+                            if let Some(service_error) = inner_error.downcast_ref::<ServiceError>() {
+                                error!("(ServiceError details: {:?})", service_error);
+                            }
+                        }
+                    }
+                    // Continue with the next holding
                 }
             }
+            // --- End Transaction per Holding ---
         }
-        
-        Ok((success_count, errors))
+
+        info!("Finished daily interest accrual process for date {}. Accrued for {} holdings.", accrual_date, success_count);
+        Ok(success_count)
     }
-    
-    // 处理单个到期票据的兑付
-    async fn process_maturity_payment(&self, holding: &UserInvoiceHolding) -> Result<()> {
-        // 计算应付总额：本金 + 累计利息
-        let principal = holding.current_balance.to_string().parse::<f64>()?;
-        let interest = holding.total_accrued_interest.to_string().parse::<f64>()?;
-        let total_payment = principal + interest;
-        
-        let total_payment_decimal = Decimal128::from_string(&format!("{:.8}", total_payment))?;
-        
-        // 开始事务
-        let mut session = self.db.client().start_session(None).await?;
-        session.start_transaction(None).await?;
-        
-        // 1. 记录兑付交易
-        let transaction = Transaction::new_maturity_payment(
-            holding.user_id.clone(),
-            holding.invoice_id,
-            holding.holding_id.clone(),
-            total_payment_decimal
-        );
-        
-        self.transaction_repo.create(transaction).await?;
-        
-        // 2. 更新持仓状态为已到期
-        self.user_holding_repo.update_holding_status(
-            &holding.holding_id,
-            HoldingStatus::Matured
-        ).await?;
-        
-        // 3. 在此处执行实际的资金兑付操作（例如调用支付系统）
-        // TODO: 实现实际的资金兑付逻辑
-        
-        // 提交事务
-        session.commit_transaction().await?;
-        
-        Ok(())
+
+    // Renamed from process_maturity_payments
+    pub async fn process_maturity_payments_for_date(&self, payment_date: NaiveDate) -> Result<u32, ServiceError> {
+        info!("Processing maturity payments for date: {}", payment_date);
+
+        // Find holdings maturing on this date
+        let maturing_holdings = self.user_holding_repo.find_maturing_holdings(payment_date).await
+            .map_err(|e| ServiceError::MongoDbError(e.to_string()))?;
+
+        if maturing_holdings.is_empty() {
+            info!("No maturing holdings found for date: {}", payment_date);
+            return Ok(0);
+        }
+
+        info!("Found {} holdings maturing on {}", maturing_holdings.len(), payment_date);
+        let mut success_count = 0;
+
+        for holding in maturing_holdings {
+             let holding_id_str = holding.holding_id.clone();
+
+             // --- Calculate Payment Amount (outside transaction) --- 
+             let principal = holding.purchase_amount.clone();
+             let accrued_interest = holding.total_accrued_interest.clone();
+             // TODO: Implement robust Decimal128 addition if necessary
+             let principal_f64 = principal.to_string().parse::<f64>().unwrap_or(0.0); // Handle parse error?
+             let interest_f64 = accrued_interest.to_string().parse::<f64>().unwrap_or(0.0); // Handle parse error?
+             let total_payment_f64 = principal_f64 + interest_f64;
+             let total_payment_decimal = match Decimal128::from_str(&format!("{:.8}", total_payment_f64)) {
+                 Ok(d) => d,
+                 Err(e) => {
+                     error!("Failed to parse total payment '{}' for holding {}: {}. Skipping.", total_payment_f64, holding_id_str, e);
+                     continue;
+                 }
+             };
+
+            // --- Start Transaction per Holding --- 
+            let mut session = match self.db.client().start_session().await {
+                 Ok(s) => s,
+                 Err(e) => {
+                     error!("Failed to start session for maturity payment on holding {}: {}. Skipping.", holding_id_str, e);
+                     continue;
+                 }
+            };
+            let transaction_result = session.start_transaction()
+                .and_run(
+                    (self, &holding, total_payment_decimal.clone()), // Clone payment decimal
+                    |session, (service, h, payment_amount)| {
+                        async move { 
+                            // a. Create MaturityPayment transaction record
+                            let transaction = Transaction::new_maturity_payment(
+                                h.user_id.clone(),
+                                h.invoice_id,
+                                h.holding_id.clone(),
+                                payment_amount.clone(),
+                            );
+                            service.transaction_repo.create_session(transaction, session).await?;
+
+                            // b. Update holding status to Matured
+                            service.user_holding_repo.update_holding_status_session(
+                                &h.holding_id,
+                                HoldingStatus::Matured, 
+                                session,
+                            ).await?;
+                            
+                            // c. Simulate crediting user balance
+                            let user_addr = &h.user_id;
+                            let update_successful = service.user_repo.update_balance_session(user_addr, payment_amount.clone(), session).await?;
+                            if !update_successful {
+                                error!("Failed to credit balance for user {} during maturity payment.", user_addr);
+                                // Note: Returning error here rolls back the whole transaction
+                                return Err(ServiceError::BalanceUpdateFailed(user_addr.to_string()));
+                            }
+                            info!("Credited maturity payment {} to user {} within transaction", payment_amount, user_addr);
+
+                            Ok(())
+                        }
+                        .map(|res| res.map_err(|service_err: ServiceError| {
+                            MongoError::custom(Box::new(service_err))
+                        }))
+                       .boxed()
+                    }
+                ).await;
+
+             match transaction_result {
+                Ok(_) => {
+                    success_count += 1;
+                    info!("Successfully processed maturity for holding {}", holding_id_str);
+                    // TODO: Trigger actual off-chain payout here AFTER successful commit?
+                    // Or should payout be triggered by listening to events/DB changes?
+                }
+                Err(e) => {
+                    error!("Failed transaction for maturity payment on holding {}: {:?}", holding_id_str, e);
+                     if let MongoError { kind: ref error_kind, .. } = e {
+                        if let mongodb::error::ErrorKind::Custom(inner_error) = &**error_kind {
+                            if let Some(service_error) = inner_error.downcast_ref::<ServiceError>() {
+                                error!("(ServiceError details: {:?})", service_error);
+                            }
+                        }
+                    }
+                    // Continue with the next holding
+                }
+            }
+            // --- End Transaction per Holding --- 
+        }
+
+        info!("Successfully processed {} maturity payments for date: {}", success_count, payment_date);
+        Ok(success_count)
     }
 }

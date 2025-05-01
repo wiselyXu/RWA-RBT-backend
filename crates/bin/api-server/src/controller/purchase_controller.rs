@@ -3,12 +3,14 @@ use salvo::prelude::*;
 use std::sync::Arc;
 use mongodb::Database;
 use crate::utils::res::{Res, res_json_err, res_json_ok};
-use common::domain::dto::{PurchaseInvoiceDto, HoldingDto, InvoiceRedisDto};
+
 use common::domain::entity::UserInvoiceHolding;
 use service::service::PurchaseService;
 use log::{error, info};
 use serde::{Deserialize, Serialize};
-
+use common::domain::dto::holding_dto::HoldingDto;
+use common::domain::dto::invoice_redis_dto::InvoiceRedisDto;
+use common::domain::dto::purchase_invoice_dto::PurchaseInvoiceDto;
 // --- API Handlers ---
 
 /// 获取可购买的票据列表
@@ -62,14 +64,19 @@ pub async fn purchase_invoice(req: JsonBody<PurchaseInvoiceDto>, depot: &mut Dep
     
     let purchase_data = req.into_inner();
     
-    info!("User {} is purchasing invoice: {}, shares: {}", 
-          user_address, purchase_data.invoice_id, purchase_data.shares);
+    info!("User {} is purchasing invoice: {}, amount: {}", 
+          user_address, purchase_data.invoice_id, purchase_data.purchase_amount);
     
-    match purchase_service.purchase_invoice(user_address, purchase_data).await {
+    match purchase_service.purchase_invoice(user_address, &purchase_data).await {
         Ok(holding) => {
             // 转换为DTO
-            let holding_dto = convert_to_holding_dto(holding).await?;
-            Ok(res_json_ok(Some(holding_dto)))
+            match convert_to_holding_dto(holding).await {
+                Ok(holding_dto) => Ok(res_json_ok(Some(holding_dto))),
+                Err(e) => {
+                    error!("Failed to convert holding to DTO after purchase: {}", e);
+                    Err(res_json_err("购买成功但转换数据失败"))
+                }
+            }
         }
         Err(e) => {
             error!("Purchase failed for user {}: {}", user_address, e);
@@ -136,6 +143,7 @@ async fn convert_to_holding_dto(holding: UserInvoiceHolding) -> Result<HoldingDt
     
     let holding_dto = HoldingDto {
         holding_id: holding.holding_id,
+        user_id: holding.user_id,
         invoice_id: holding.invoice_id.to_hex(),
         invoice_number: "PLACEHOLDER".to_string(), // 实际应查询获取
         title: "PLACEHOLDER".to_string(),          // 实际应查询获取

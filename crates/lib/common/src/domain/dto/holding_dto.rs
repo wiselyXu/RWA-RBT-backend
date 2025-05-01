@@ -2,10 +2,12 @@ use serde::{Deserialize, Serialize};
 use chrono::NaiveDate;
 use mongodb::bson::{DateTime, Decimal128, oid::ObjectId};
 use crate::domain::entity::HoldingStatus;
+use salvo::oapi::ToSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct HoldingDto {
     pub holding_id: String,
+    pub user_id: String,
     pub invoice_id: String,
     pub invoice_number: String,
     pub title: String,

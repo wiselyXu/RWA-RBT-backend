@@ -3,7 +3,7 @@ use crate::{
     router::middware::route_logger,
 };
 
-use configs::CFG;
+use configs::{cfgs::Redis as RedisConfig, CFG};
 use mongodb::Database; // Changed from sea_orm::DatabaseConnection
 use redis::Client as RedisClient;
 use salvo::Handler;
@@ -21,16 +21,16 @@ use salvo::{
     serve_static::StaticDir,
     session::CookieStore,
 };
-use service::{db::init_mongodb, init_redis_client}; // Updated import
+use service::invoice::InvoiceService; // Import InvoiceService
 use std::{env, sync::Arc};
 use pharos_interact::{InvoiceContract, ContractQuerier, ContractWriter}; // Import for contract interaction
 use ethers::middleware::SignerMiddleware;
 use ethers::providers::{Http, Provider};
 use ethers::signers::LocalWallet;
 
-
 pub mod middware;
 pub mod router;
+use router::{init_user_router, init_enterprise_router, init_invoice_router}; // Import all routers
 
 // --- Injection Middleware Struct ---
 #[derive(Clone)] // Clone is needed for the handler
@@ -38,6 +38,7 @@ struct InjectConnections {
     mongodb: Arc<Database>, // Changed from db_conn: Arc<DatabaseConnection>
     redis_client: Arc<RedisClient>,
     contract: Option<Arc<InvoiceContract<SignerMiddleware<Provider<Http>, LocalWallet>>>>, // Contract connection
+    invoice_service: Arc<InvoiceService>, // Add InvoiceService
 }
 
 #[async_trait]
@@ -45,6 +46,7 @@ impl Handler for InjectConnections {
     async fn handle(&self, req: &mut Request, depot: &mut Depot, res: &mut Response, ctrl: &mut FlowCtrl) {
         depot.inject(self.mongodb.clone()); // Updated
         depot.inject(self.redis_client.clone());
+        depot.inject(self.invoice_service.clone()); // Inject InvoiceService
         
         // Inject contract connection if available
         if let Some(contract) = &self.contract {
@@ -67,9 +69,10 @@ pub fn init_router() -> Router {
 
     // Business routes under /rwa prefix
     let api_router = Router::with_path(&CFG.server.api_prefix) // Use configured prefix
-        .push(router::init_user_router()) // Existing user/auth routes
-        .push(router::init_enterprise_router()) // Add enterprise routes
-        .push(router::init_invoice_router()); // Add invoice routes
+        .push(init_user_router()) // Existing user/auth routes
+        .push(init_enterprise_router()) // Add enterprise routes
+        .push(init_invoice_router()); // Keep non-RWA invoice routes if needed
+
 
     let router = router.push(api_router);
 
@@ -94,68 +97,31 @@ pub fn init_router() -> Router {
     );
     router
 }
-use std::sync::Arc;
-use salvo::{Router, prelude::*};
-use service::{db::init_mongodb, invoice::InvoiceService, cache::init_redis_client}; 
-use crate::handler::InvoiceHandler;
-use crate::middleware::auth::token_validator;
 
-pub fn create_router(db_url: &str, redis_config: &config::redis::Redis) -> Result<Router, Box<dyn std::error::Error>> {
-    // 初始化MongoDB
-    let db = init_mongodb(db_url)?;
-    
-    // 初始化Redis客户端
-    let redis_client = init_redis_client(redis_config)?;
-    
-    // 创建服务实例
-    let invoice_service = Arc::new(InvoiceService::new(db, redis_client));
-    
-    // 创建处理器
-    let invoice_handler = InvoiceHandler::new(invoice_service.clone());
-    
-    // 设置定时任务
-    service::invoice::setup_scheduled_tasks(invoice_service);
-    
-    // 创建路由
-    let router = Router::new()
-        // 公开API（无需身份验证）
-        .push(
-            Router::with_path("api/v1/invoices/available")
-                .get(invoice_handler.get_available_invoices)
-        )
-        // 需要身份验证的API
-        .push(
-            Router::with_path("api/v1")
-                .hoop(token_validator)
-                .push(
-                    Router::with_path("invoices/purchase")
-                        .post(invoice_handler.purchase_invoice)
-                )
-                .push(
-                    Router::with_path("holdings")
-                        .get(invoice_handler.get_user_holdings)
-                )
-                .push(
-                    Router::with_path("holdings/<holdingId>/interest")
-                        .get(invoice_handler.get_holding_interest_details)
-                )
-        );
-    
-    Ok(router)
-}
-// Modify init_service to accept contract connection
+// Modify init_service to create and inject InvoiceService
 pub fn init_service(
     mongodb: Arc<Database>, 
     redis_client: Arc<RedisClient>,
-    contract: Option<Arc<InvoiceContract<SignerMiddleware<Provider<Http>, LocalWallet>>>>
+    contract: Option<Arc<InvoiceContract<SignerMiddleware<Provider<Http>, LocalWallet>>>>,
 ) -> Service {
     let router = init_router();
 
+    // Create InvoiceService instance here
+    // Note: InvoiceService::new expects Database, not Arc<Database>. Need to adjust service or clone DB?
+    // Assuming InvoiceService::new can take Arc<Database> or we adjust it later.
+    // Also InvoiceService::new expects RedisClient, not Arc<RedisClient>.
+    let invoice_service = Arc::new(InvoiceService::new((*mongodb).clone(), (*redis_client).clone()));
+
+    // Setup scheduled tasks (ensure this runs only once)
+    // Might be better to do this in main.rs after service creation
+    // service::invoice::setup_scheduled_tasks(invoice_service.clone()); 
+
     // Create the injector instance
     let injector = InjectConnections {
-        mongodb, // Updated field name
+        mongodb, 
         redis_client,
         contract,
+        invoice_service, // Inject the created service
     };
 
     // Apply CORS, then injection, then catcher, then router

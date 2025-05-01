@@ -34,6 +34,9 @@ pub struct Invoice {
     pub is_cleared: Option<bool>,     // Blockchain clearance status
     pub is_valid: Option<bool>,       // Blockchain validity status
     
+    // --- RWA Specific Data (for interest calculation) ---
+    pub annual_interest_rate: f64, // Annual interest rate percentage
+    
     // --- Timestamps ---
     pub created_at: DateTime,
     pub updated_at: DateTime,
@@ -82,6 +85,7 @@ impl Invoice {
             token_batch: None,
             is_cleared: None,
             is_valid: None,
+            annual_interest_rate: 0.0, // Default rate, should be set explicitly
             created_at: now,
             updated_at: now,
         }
@@ -129,6 +133,8 @@ pub struct InvoiceDto {
     pub is_cleared: Option<bool>,
     /// 是否有效 (from Blockchain)
     pub is_valid: Option<bool>,
+    /// 年化利率
+    pub annual_interest_rate: f64,
 }
 
 impl From<&Invoice> for InvoiceDto {
@@ -153,6 +159,7 @@ impl From<&Invoice> for InvoiceDto {
             token_batch: data.token_batch.clone(),
             is_cleared: data.is_cleared,
             is_valid: data.is_valid,
+            annual_interest_rate: data.annual_interest_rate,
         }
     }
 }

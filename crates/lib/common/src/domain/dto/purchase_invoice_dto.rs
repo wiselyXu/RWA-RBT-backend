@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
+use salvo::oapi::ToSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct PurchaseInvoiceDto {
     pub invoice_id: String,
-    pub shares: u64,
-    // 如果使用金额代替份数，则使用下面的字段
-    // pub amount: f64,
+    pub purchase_amount: f64,
 }

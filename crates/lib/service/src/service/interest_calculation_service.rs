@@ -1,8 +1,11 @@
+use std::str::FromStr;
 use mongodb::{bson::{self, Decimal128, oid::ObjectId}, Database};
-use anyhow::{Result, Context};
-use chrono::{NaiveDate, Utc};
+use anyhow::{Result, Context, anyhow};
+use chrono::{NaiveDate, TimeZone, Utc};
+use chrono::Datelike;
 use std::sync::Arc;
 use log::{info, error, warn};
+use crate::error::ServiceError;
 
 use crate::repository::{
     DailyInterestAccrualRepository,
@@ -50,9 +53,9 @@ impl InterestCalculationService {
         let days_in_year = if is_leap_year { 366.0 } else { 365.0 };
         
         // 将日期转换为MongoDB的DateTime
-        let accrual_date = bson::DateTime::from_chrono(
-            date.and_hms_opt(0, 0, 0).unwrap().naive_utc()
-        );
+        let start_of_day_naive = date.and_hms_opt(0, 0, 0).unwrap();
+        let start_of_day_utc = Utc.from_utc_datetime(&start_of_day_naive);
+        let accrual_date = bson::DateTime::from_millis(start_of_day_utc.timestamp_millis());
         
         let mut success_count = 0;
         
@@ -76,7 +79,7 @@ impl InterestCalculationService {
             };
             
             // 计算日利率：年利率 / 当年天数
-            let annual_rate = invoice.annual_rate;
+            let annual_rate = invoice.annual_interest_rate;
             let daily_rate = annual_rate / days_in_year / 100.0; // 年利率是百分比，需要除以100
             
             // 计算当日利息：本金 * 日利率
@@ -84,7 +87,8 @@ impl InterestCalculationService {
             let daily_interest = principal * daily_rate;
             
             // 转换为Decimal128
-            let daily_interest_decimal = Decimal128::from_str_exact(&daily_interest.to_string())?;
+            let daily_interest_decimal = Decimal128::from_str(&daily_interest.to_string())
+                .map_err(|e| ServiceError::DecimalConversionError(format!("Failed to parse daily interest '{}': {}", daily_interest, e)))?;
             
             // 创建日利息记录
             let accrual = DailyInterestAccrual::new(
@@ -156,7 +160,8 @@ impl InterestCalculationService {
                 let i = i_str.parse::<f64>().unwrap_or(0.0);
                 
                 let total = p + i;
-                Decimal128::from_str_exact(&total.to_string())?
+                Decimal128::from_str(&total.to_string())
+                    .map_err(|e| ServiceError::DecimalConversionError(format!("Failed to parse maturity amount '{}': {}", total, e)))?
             };
             
             // 创建到期兑付的交易记录

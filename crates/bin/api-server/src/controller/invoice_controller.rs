@@ -304,3 +304,24 @@ async fn query_and_save_from_blockchain(invoice_number: &str, depot: &mut Depot,
         }
     }
 }
+
+/// 查询票据数据 (优先查数据库，没有再查链上)
+#[salvo::oapi::endpoint(
+    tags("票据"),
+    status_codes(200, 401, 404, 500),
+    parameters(
+        ("holdingId" in Path, description = "Holding ID")
+    ),
+    responses(
+        (status_code = 200, description = "成功获取利息明细", body = Vec<common::domain::dto::holding_dto::InterestDetailDto>),
+        (status_code = 401, description = "未认证"),
+        (status_code = 404, description = "持仓未找到"),
+        (status_code = 500, description = "服务器内部错误"),
+    )
+)]
+pub async fn get_holding_interest_details(req: &mut Request, depot: &mut Depot) -> Res<Vec<common::domain::dto::holding_dto::InterestDetailDto>> {
+    // TODO: Implement logic to get user_id from auth, get holdingId from path params, call service, handle errors
+    let holding_id = req.param::<String>("holdingId").unwrap_or_default();
+    error!("get_holding_interest_details for {} not implemented yet", holding_id);
+    Err(res_json_err("Not implemented yet"))
+}

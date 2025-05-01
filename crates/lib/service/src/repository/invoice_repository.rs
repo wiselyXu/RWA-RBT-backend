@@ -79,8 +79,9 @@ impl InvoiceRepository {
     // Find invoice by invoice_number within a transaction session
     pub async fn find_by_number_session(&self, invoice_number: &str, session: &mut ClientSession) -> Result<Option<Invoice>, ServiceError> {
         let filter = doc! { "invoice_number": invoice_number };
-        self.collection.find_one_with_session(filter, None, session).await
-            .map_err(|e| ServiceError::MongoDbError(e.into()))
+        // Use find_one() with session argument
+        self.collection.find_one(filter).session(session).await
+            .map_err(|e| ServiceError::MongoDbError(e.to_string()))
     }
 
     // Find invoices by user_address

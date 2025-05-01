@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use mongodb::bson::{DateTime, oid::ObjectId, Decimal128};
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +27,7 @@ pub enum UserRole {
 impl User {
     pub fn new(wallet_address: String,name:String, role: UserRole) -> Self {
         let now = DateTime::now();
-        let zero_balance = Decimal128::from_str_exact("0.0").unwrap_or_else(|_| Decimal128::from(0i64));
+        let zero_balance = Decimal128::from_str("0.0").unwrap();
         Self {
             id: None,
             name,

@@ -1,12 +1,13 @@
 use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use mongodb::bson::{self, oid::ObjectId, DateTime, Document, Decimal128};
+use salvo::oapi::ToSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 pub enum HoldingStatus {
     Active,
     Matured,
-    Withdrawn,
+    Sold,
 }
 
 impl Default for HoldingStatus {

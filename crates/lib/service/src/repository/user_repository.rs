@@ -37,8 +37,9 @@ impl UserRepository {
                 options: "i".to_string()
             }
         };
-        self.collection.find_one_with_session(filter, None, session).await
-            .map_err(|e| ServiceError::MongoDbError(e.into()))
+        // Use find_one() with session argument
+        self.collection.find_one(filter).session(session).await
+            .map_err(|e| ServiceError::MongoDbError(e.to_string()))
     }
 
     // Atomically update user balance within a transaction session
@@ -57,8 +58,9 @@ impl UserRepository {
             "$set": { "updated_at": DateTime::now() } 
         };
 
-        let result = self.collection.update_one_with_session(filter, update, None, session).await
-            .map_err(|e| ServiceError::MongoDbError(e.into()))?;
+        // Use update_one() with session argument
+        let result = self.collection.update_one(filter, update).session(session).await
+            .map_err(|e| ServiceError::MongoDbError(e.to_string()))?;
 
         Ok(result.modified_count > 0)
     }

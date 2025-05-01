@@ -3,30 +3,17 @@ pub mod invoice_redis_service;
 pub use invoice_redis_service::InvoiceRedisService;
 
 use anyhow::{Result, Context};
-use redis::Client;
-use configs::redis::Redis as RedisConfig;
+use log::info;
+use redis::{Client, RedisError};
+use configs::cfgs::Redis;
 
 // 初始化Redis客户端
-pub fn init_redis_client(config: &RedisConfig) -> Result<Client> {
-    let redis_url = format!(
-        "redis://{}:{}@{}:{}/{}",
-        config.username, 
-        config.password, 
-        config.host, 
-        config.port, 
-        config.db
-    );
-    
-    let client = Client::open(redis_url)
-        .context("Failed to create Redis client")?;
-        
-    // 测试连接
-    let mut conn = client.get_connection()
-        .context("Failed to connect to Redis")?;
-        
-    redis::cmd("PING")
-        .query(&mut conn)
-        .context("Failed to ping Redis server")?;
-        
+pub fn init_redis_client(redis_config: &Redis) -> std::result::Result<Client, RedisError> {
+    info!("Initializing Redis client for URL: {}", redis_config.url);
+    let client = Client::open(redis_config.url.as_str())?;
+    // Note: Connection is established lazily when a command is executed.
+    // You could optionally ping here to ensure connectivity immediately.
+    // client.get_connection()?.ping()?;
+    info!("Redis client initialized successfully.");
     Ok(client)
 }
