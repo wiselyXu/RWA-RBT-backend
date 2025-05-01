@@ -1,7 +1,8 @@
 use anyhow::Result;
 use common::domain::entity::{Transaction, TransactionType};
 use futures::TryStreamExt;
-use mongodb::{Collection, Database, bson::{DateTime, Decimal128, doc, oid::ObjectId}, options::FindOptions, bson};
+use mongodb::{Collection, Database, bson::{DateTime, Decimal128, doc, oid::ObjectId}, options::FindOptions, bson, ClientSession};
+use crate::error::ServiceError;
 
 pub struct TransactionRepository {
     collection: Collection<Transaction>,
@@ -21,6 +22,16 @@ impl TransactionRepository {
 
         let created_transaction = self.find_by_id(id).await?;
         Ok(created_transaction.unwrap())
+    }
+
+    // 创建交易记录 within a transaction session
+    pub async fn create_session(&self, transaction: Transaction, session: &mut ClientSession) -> Result<Transaction, ServiceError> {
+        let mut transaction = transaction;
+        let result = self.collection.insert_one_with_session(&transaction, None, session).await
+            .map_err(|e| ServiceError::MongoDbError(e.into()))?;
+        transaction.id = Some(result.inserted_id.as_object_id().unwrap()); // Assign the MongoDB generated _id
+        // We return the input struct updated with the ID, as insert_one_with_session doesn't return the doc.
+        Ok(transaction)
     }
 
     // 根据ID查找交易记录

@@ -1,8 +1,10 @@
 use anyhow::{Result, anyhow};
 use redis::{Client, Commands, Connection, AsyncCommands};
-use common::domain::dto::InvoiceRedisDto;
+
 use serde_json;
 use std::sync::Arc;
+use common::domain::dto::invoice_redis_dto::InvoiceRedisDto;
+use common::domain::entity::InvoiceStatus;
 
 pub struct InvoiceRedisService {
     client: Client,
@@ -63,7 +65,7 @@ impl InvoiceRedisService {
     }
     
     // 更新票据的可用份数
-    pub fn update_invoice_shares(&self, invoice_id: &str, purchased_shares: u32) -> Result<()> {
+    pub fn update_invoice_shares(&self, invoice_id: &str, purchased_shares: u64) -> Result<()> {
         let mut conn = self.get_connection()?;
         
         let key = format!("invoice:{}", invoice_id);
@@ -85,7 +87,7 @@ impl InvoiceRedisService {
         
         // 如果可用份数为0，更新状态
         if invoice.available_shares == 0 {
-            invoice.status = "SOLD_OUT".to_string();
+            invoice.status = InvoiceStatus::SoldOut;
         }
         
         // 保存更新后的票据数据

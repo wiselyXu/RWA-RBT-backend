@@ -2,35 +2,6 @@ use salvo::prelude::ToSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use chrono::NaiveDate;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InvoiceRedisDto {
-    pub invoice_id: String,
-    pub invoice_number: String,
-    pub title: String,
-    pub payee: String,
-    pub payer: String,
-    pub issue_date: NaiveDate,
-    pub maturity_date: NaiveDate,
-    pub face_value: String,
-    pub annual_rate: f64,
-    pub total_shares: u32,
-    pub available_shares: u32,
-    pub share_price: f64,
-    pub status: String,
-}
-
-impl InvoiceRedisDto {
-    pub fn is_available_for_purchase(&self) -> bool {
-        self.status == "ACTIVE" && self.available_shares > 0
-    }
-    
-    pub fn calculate_daily_rate(&self, is_leap_year: bool) -> f64 {
-        // 计算日利率：年利率 / 当年天数
-        let days_in_year = if is_leap_year { 366.0 } else { 365.0 };
-        self.annual_rate / days_in_year / 100.0 // 年利率是百分比，需要除以100
-    }
-}
 /// Data Transfer Object for Invoice data. Used for both input and output.
 #[derive(Debug, Clone, Serialize, Deserialize,ToSchema)]
 #[serde(rename_all = "camelCase")]

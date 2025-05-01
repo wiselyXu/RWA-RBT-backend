@@ -1,10 +1,11 @@
-use mongodb::{bson, bson::{doc, oid::ObjectId, DateTime}, Collection, Database};
+use mongodb::{bson, bson::{doc, oid::ObjectId, DateTime, Decimal128}, Collection, Database, ClientSession};
 
 use log::{info, error};
 use common::domain::entity::{User, UserRole};
 use mongodb::options::UpdateOptions;
 use futures::stream::TryStreamExt; // For cursor iteration
 use regex;
+use crate::error::ServiceError;
 
 pub struct UserRepository {
     collection: Collection<User>,
@@ -26,6 +27,40 @@ impl UserRepository {
             }
         };
         self.collection.find_one(filter).await
+    }
+
+    // Find user by wallet address within a transaction session (case-insensitive)
+    pub async fn find_by_wallet_address_session(&self, wallet_address: &str, session: &mut ClientSession) -> Result<Option<User>, ServiceError> {
+        let filter = doc! { 
+            "wallet_address": bson::Regex { 
+                pattern: format!("^{}$", regex::escape(wallet_address)), 
+                options: "i".to_string()
+            }
+        };
+        self.collection.find_one_with_session(filter, None, session).await
+            .map_err(|e| ServiceError::MongoDbError(e.into()))
+    }
+
+    // Atomically update user balance within a transaction session
+    // `amount_to_add` can be negative to deduct balance.
+    pub async fn update_balance_session(&self, user_wallet_address: &str, amount_to_add: Decimal128, session: &mut ClientSession) -> Result<bool, ServiceError> {
+        let filter = doc! { 
+            "wallet_address": bson::Regex { 
+                pattern: format!("^{}$", regex::escape(user_wallet_address)), 
+                options: "i".to_string()
+            }
+            // Optionally add a condition to prevent balance going below zero if needed
+            // "$expr": { "$gte": [ { "$add": ["$balance", amount_to_add] }, Decimal128::from(0i64) ] } 
+        };
+        let update = doc! { 
+            "$inc": { "balance": amount_to_add },
+            "$set": { "updated_at": DateTime::now() } 
+        };
+
+        let result = self.collection.update_one_with_session(filter, update, None, session).await
+            .map_err(|e| ServiceError::MongoDbError(e.into()))?;
+
+        Ok(result.modified_count > 0)
     }
 
     // Create a new user

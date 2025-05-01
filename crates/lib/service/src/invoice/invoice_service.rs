@@ -2,7 +2,7 @@ use mongodb::{Database, bson::{doc, Decimal128, oid::ObjectId}};
 use anyhow::{Result, anyhow};
 use chrono::{Utc, NaiveDate, Duration};
 use crate::{
-    cache::InvoiceRedisService,
+   
     repository::{
         UserInvoiceHoldingRepository,
         DailyInterestAccrualRepository,
@@ -17,13 +17,15 @@ use common::domain::{
         HoldingStatus,
     },
     dto::{
-        invoice_dto::InvoiceRedisDto,
+
         purchase_invoice_dto::PurchaseInvoiceDto,
         holding_dto:: HoldingDto,
         interest_detail_dto::InterestDetailDto,
     },
 };
 use redis::Client as RedisClient;
+use common::domain::dto::invoice_redis_dto::InvoiceRedisDto;
+use crate::cache::InvoiceRedisService;
 
 pub struct InvoiceService {
     db: Database,

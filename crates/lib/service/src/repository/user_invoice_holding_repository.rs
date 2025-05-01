@@ -1,12 +1,13 @@
 use mongodb::{
     bson::{doc, DateTime, Decimal128, oid::ObjectId},
-    Collection, Database,
+    Collection, Database, ClientSession,
     options::FindOptions,
 };
 use anyhow::{Result, anyhow};
 use common::domain::entity::{UserInvoiceHolding, HoldingStatus};
 use futures::TryStreamExt;
 use chrono::{Utc, NaiveDate};
+use crate::error::ServiceError;
 
 pub struct UserInvoiceHoldingRepository {
     collection: Collection<UserInvoiceHolding>,
@@ -25,6 +26,18 @@ impl UserInvoiceHoldingRepository {
         let result = self.collection.insert_one(&holding).await?;
         holding.id = Some(result.inserted_id.as_object_id().unwrap());
         Ok(holding)
+    }
+    
+    // 创建新的持仓记录 within a transaction session
+    pub async fn create_session(&self, holding: UserInvoiceHolding, session: &mut ClientSession) -> Result<UserInvoiceHolding, ServiceError> {
+        let mut holding = holding;
+        // Note: insert_one_with_session doesn't take options like returning the document directly.
+        // We insert and rely on the input `holding` struct (which has the holding_id already generated).
+        // The _id (database id) is set after insertion if needed elsewhere.
+        let result = self.collection.insert_one_with_session(&holding, None, session).await
+            .map_err(|e| ServiceError::MongoDbError(e.into()))?;
+        holding.id = Some(result.inserted_id.as_object_id().unwrap()); // Assign the MongoDB generated _id
+        Ok(holding) // Return the original holding struct, now with the db id
     }
     
     // 根据用户ID查询持仓列表
