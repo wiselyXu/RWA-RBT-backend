@@ -3,7 +3,7 @@ tests:
 	cargo test --all -- --nocapture
 
 build:
-	cargo build --release
+	cargo build --release --timings
 
 doc:
 	cargo doc --no-deps --open

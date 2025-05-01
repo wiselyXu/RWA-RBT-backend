@@ -4,6 +4,7 @@ use common::domain::dto::query_invoice_dto::QueryParamsDto;
 use common::domain::entity::enterprise::EnterpriseDto;
 use common::domain::entity::invoice::InvoiceDto;
 use common::domain::entity::{Invoice, InvoiceStatus};
+use common::domain::dto::interest_detail_dto::InterestDetailDto;
 use ethers::middleware::SignerMiddleware;
 use ethers::providers::{Http, Provider};
 use ethers::signers::LocalWallet;
@@ -20,10 +21,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use service::repository::InvoiceRepository;
 use service::repository::invoice_repository::UpdateInvoiceData;
+use service::invoice::InvoiceService;
 use std::convert::From;
 use std::str::FromStr;
 use std::sync::Arc;
 use log::error;
+use chrono::NaiveDate;
 
 // --- Handlers ---
 /// 创建一个票据 (Standard endpoint for creating invoice directly in DB)
@@ -208,6 +211,138 @@ pub async fn query_invoice_data(invoice_number: QueryParam<String>, depot: &mut 
         Err(e) => {
             log::error!("Database query failed for invoice {}: {}", invoice_number_query, e);
             Err(res_json_err("Database query failed"))
+        }
+    }
+}
+
+/// 查询持仓利息明细
+#[salvo::oapi::endpoint(
+    tags("票据"),
+    status_codes(200, 400, 401, 404, 500),
+    parameters(
+        ("holding_id" = String, Query, description = "Holding ID to get interest details for")
+    ),
+    responses(
+        (status_code = 200, description = "Interest details found.", body = Vec<InterestDetailDto>),
+        (status_code = 400, description = "Invalid request parameters."),
+        (status_code = 401, description = "User not authenticated."),
+        (status_code = 404, description = "Holding not found or not owned by user."),
+        (status_code = 500, description = "Internal server error."),
+    )
+)]
+pub async fn get_holding_interest_details(holding_id: QueryParam<String>, depot: &mut Depot) -> Res<Vec<InterestDetailDto>> {
+    // Get the authenticated user address
+    let user_address = match depot.get::<String>("user_address") {
+        Ok(address_ref) => address_ref.as_str(),
+        Err(e) => {
+            log::error!("Authenticated user address not found in depot: {:?}", e);
+            return Err(res_json_err("User not authenticated"));
+        }
+    };
+    
+    // Get the Invoice Service
+    let invoice_service = depot.obtain::<Arc<InvoiceService>>()
+        .expect("InvoiceService not found in depot");
+    
+    let holding_id_str = holding_id.into_inner();
+    
+    log::info!("Fetching interest details for holding {} owned by user {}", holding_id_str, user_address);
+    
+    match invoice_service.get_holding_interest_details(user_address, &holding_id_str).await {
+        Ok(details) => {
+            Ok(res_json_ok(Some(details)))
+        }
+        Err(e) => {
+            log::error!("Failed to get interest details for holding {}: {}", holding_id_str, e);
+            Err(res_json_err(&format!("Failed to retrieve interest details: {}", e)))
+        }
+    }
+}
+
+/// 管理员触发每日利息计算
+#[salvo::oapi::endpoint(
+    tags("管理员"),
+    status_codes(200, 400, 401, 500),
+    parameters(
+        ("date" = String, Query, description = "Date to calculate interest for (YYYY-MM-DD)")
+    ),
+    responses(
+        (status_code = 200, description = "Interest calculation triggered successfully.", body = u32),
+        (status_code = 400, description = "Invalid date format."),
+        (status_code = 401, description = "Not authorized."),
+        (status_code = 500, description = "Internal server error."),
+    )
+)]
+pub async fn trigger_daily_interest_calculation(date: QueryParam<String>, depot: &mut Depot) -> Res<u32> {
+    // TODO: Add admin authentication check
+    
+    let invoice_service = depot.obtain::<Arc<InvoiceService>>()
+        .expect("InvoiceService not found in depot");
+    
+    // Parse the date
+    let date_str = date.into_inner();
+    let calculation_date = match NaiveDate::parse_from_str(&date_str, "%Y-%m-%d") {
+        Ok(date) => date,
+        Err(e) => {
+            log::error!("Invalid date format: {}", e);
+            return Err(res_bad_request("Invalid date format. Please use YYYY-MM-DD."));
+        }
+    };
+    
+    log::info!("Triggering daily interest calculation for date: {}", calculation_date);
+    
+    match invoice_service.calculate_daily_interest_for_date(calculation_date).await {
+        Ok(count) => {
+            log::info!("Successfully calculated interest for {} holdings", count);
+            Ok(res_json_ok(Some(count)))
+        }
+        Err(e) => {
+            log::error!("Failed to calculate daily interest: {}", e);
+            Err(res_json_err(&format!("Failed to calculate daily interest: {}", e)))
+        }
+    }
+}
+
+/// 管理员触发到期票据还款处理
+#[salvo::oapi::endpoint(
+    tags("管理员"),
+    status_codes(200, 400, 401, 500),
+    parameters(
+        ("date" = String, Query, description = "Date to process maturity payments for (YYYY-MM-DD)")
+    ),
+    responses(
+        (status_code = 200, description = "Maturity payment processing triggered successfully.", body = u32),
+        (status_code = 400, description = "Invalid date format."),
+        (status_code = 401, description = "Not authorized."),
+        (status_code = 500, description = "Internal server error."),
+    )
+)]
+pub async fn trigger_maturity_payments(date: QueryParam<String>, depot: &mut Depot) -> Res<u32> {
+    // TODO: Add admin authentication check
+    
+    let invoice_service = depot.obtain::<Arc<InvoiceService>>()
+        .expect("InvoiceService not found in depot");
+    
+    // Parse the date
+    let date_str = date.into_inner();
+    let payment_date = match NaiveDate::parse_from_str(&date_str, "%Y-%m-%d") {
+        Ok(date) => date,
+        Err(e) => {
+            log::error!("Invalid date format: {}", e);
+            return Err(res_bad_request("Invalid date format. Please use YYYY-MM-DD."));
+        }
+    };
+    
+    log::info!("Triggering maturity payments for date: {}", payment_date);
+    
+    match invoice_service.process_maturity_payments_for_date(payment_date).await {
+        Ok(count) => {
+            log::info!("Successfully processed maturity payments for {} holdings", count);
+            Ok(res_json_ok(Some(count)))
+        }
+        Err(e) => {
+            log::error!("Failed to process maturity payments: {}", e);
+            Err(res_json_err(&format!("Failed to process maturity payments: {}", e)))
         }
     }
 }

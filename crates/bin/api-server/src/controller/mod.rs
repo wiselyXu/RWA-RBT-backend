@@ -4,6 +4,8 @@ pub mod user_controller;
 pub mod enterprise_controller;
 pub mod invoice_controller;
 pub mod purchase_controller;
+pub mod transaction_controller;
+pub mod interest_controller;
 
 use serde::{Deserialize, Serialize};
 
