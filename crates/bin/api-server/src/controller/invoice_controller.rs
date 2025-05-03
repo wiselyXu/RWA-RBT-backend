@@ -40,7 +40,7 @@ use chrono::NaiveDate;
         (status_code = 500, description = "Internal server error."),
     )
 )]
-pub async fn create_invoice(req: JsonBody<InvoiceDataDto>, depot: &mut Depot) -> Res<InvoiceDto> {
+pub async fn create_invoice(req: &mut Request, depot: &mut Depot) -> Res<InvoiceDto> {
     let mongodb = depot.obtain::<Arc<Database>>().expect("Database connection not found").clone();
     let repo = InvoiceRepository::new(&mongodb);
 
@@ -53,17 +53,26 @@ pub async fn create_invoice(req: JsonBody<InvoiceDataDto>, depot: &mut Depot) ->
         }
     };
 
-    let data = req.into_inner();
-    log::warn!("create_invoice:{:?}", data.clone());
+    // 2. Manually parse the body and handle potential deserialization errors
+    let data = match req.parse_body::<InvoiceDataDto>().await {
+        Ok(dto) => dto,
+        Err(e) => {
+            log::error!("Failed to deserialize InvoiceDataDto: {}", e);
+            return Err(res_bad_request(&format!("Invalid request body: {}", e)));
+        }
+    };
+
+    log::debug!("Attempting to create invoice in DB for user: {}", user_address);
+
     match repo.create_from_blockchain(&data).await {
         Ok(invoice) => {
-            // Convert the created Invoice entity to InvoiceDto for the response
-            let data = InvoiceDto::from(&invoice);
-            Ok(res_json_ok(Some(data)))
+            log::info!("Successfully created invoice {} for user {}", invoice.invoice_number, user_address);
+            let response_dto = InvoiceDto::from(&invoice);
+            Ok(res_json_ok(Some(response_dto)))
         }
         Err(e) => {
-            log::error!("Failed to create invoice: {}", e);
-            Err(res_json_err("Failed to create invoice"))
+            log::error!("Failed to create invoice in repository for user {}: {}", user_address, e);
+            Err(res_json_err("Failed to save invoice data"))
         }
     }
 }
@@ -405,7 +414,7 @@ async fn query_and_save_from_blockchain(invoice_number: &str, depot: &mut Depot,
                         // 查找成功，但没有找到票据
                         Ok(None) => {
                             // 票据不存在，可以安全地尝试创建
-                            log::debug!("Invoice {} not found in DB, attempting to create from blockchain data.", invoice_data_dto.invoice_number);
+                            log::debug!("Invoice {:?} not found in DB, attempting to create from blockchain data.", invoice_data_dto);
                             match repo.create_from_blockchain(&invoice_data_dto).await {
                                 Ok(saved_invoice) => {
                                     log::info!("Successfully saved new invoice {} from blockchain to DB.", saved_invoice.invoice_number);
@@ -413,13 +422,13 @@ async fn query_and_save_from_blockchain(invoice_number: &str, depot: &mut Depot,
                                 }
                                 Err(e) => {
                                     // 创建过程中发生错误
-                                    log::error!("Failed to save new invoice {} from blockchain to DB: {}", invoice_data_dto.invoice_number, e);
+                                    log::error!("Failed to save new invoice {:?} from blockchain to DB: {}", invoice_data_dto, e);
                                 }
                             }
                         }
                         // 查找过程中发生错误
                         Err(e) => {
-                            log::error!("Failed to check existence for invoice {}: {}. Skipping creation.", invoice_data_dto.invoice_number, e);
+                            log::error!("Failed to check existence for invoice {:?}: {}. Skipping creation.", invoice_data_dto, e);
                             // 如果查找失败，也跳过创建，避免潜在的重复
                         }
                     }

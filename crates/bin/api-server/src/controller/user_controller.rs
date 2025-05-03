@@ -89,6 +89,20 @@ pub struct BindEnterpriseRequest {
     pub enterprise_address: String,
 }
 
+// 用户绑定的企业信息响应
+#[derive(Serialize, ToSchema, Debug)]
+#[salvo(schema(example = json!({ "isEnterpriseBound": true, "enterpriseName": "Acme Corp", "enterpriseAddress": "0x..." })))]
+pub struct EnterpriseInfoResponse {
+    #[serde(rename = "isEnterpriseBound")]
+    pub is_enterprise_bound: bool,
+    #[serde(rename = "enterpriseName", skip_serializing_if = "Option::is_none")]
+    pub enterprise_name: Option<String>,
+    #[serde(rename = "enterpriseAddress", skip_serializing_if = "Option::is_none")]
+    pub enterprise_address: Option<String>,
+    #[serde(rename = "enterpriseId", skip_serializing_if = "Option::is_none")]
+    pub enterprise_id: Option<String>,
+}
+
 // --- Handlers ---
 
 /// 登录步骤1 生成一个挑战
@@ -183,7 +197,7 @@ pub async fn login(req: JsonBody<LoginRequest>, depot: &mut Depot, request: &mut
     info!("Successfully recovered address: {}", recovered_address_str);
 
     // 5. Process user login (find or create user based on recovered address)
-    let _user = match user_repo.process_login(&recovered_address_str).await {
+    let user = match user_repo.process_login(&recovered_address_str).await {
         Ok(db_user) => {
             info!("Processed login for user: {}", recovered_address_str);
             db_user // Keep the user object if needed later, otherwise ignore
@@ -201,9 +215,18 @@ pub async fn login(req: JsonBody<LoginRequest>, depot: &mut Depot, request: &mut
     let expiration_time = now + chrono::Duration::days(1);
     let exp_timestamp = expiration_time.timestamp() as usize;
 
+    // Convert user role to string
+    let role_str = match user.role {
+        common::domain::entity::UserRole::Investor => "investor",
+        common::domain::entity::UserRole::EnterpriseAdmin => "creditor",
+        common::domain::entity::UserRole::PlatformAdmin => "admin",
+    };
+
     let claims = Claims {
         sub: recovered_address_str.clone(), // Use recovered address as subject
         exp: exp_timestamp,
+        user_id: user.id.unwrap().to_hex(), // Add user_id field
+        role: role_str.to_string(), // Add role field
     };
 
     // Retrieve the secret key from configuration
@@ -297,6 +320,87 @@ pub async fn bind_enterprise(req: JsonBody<BindEnterpriseRequest>, depot: &mut D
             error!("Database error binding user {} to enterprise {}: {}", user_address, enterprise_oid, e);
             Err(res_json_custom(500, "DatabaseError"))
         }
+    }
+}
+
+/// 获取用户绑定的企业信息 (需要认证)
+#[salvo::oapi::endpoint(
+    tags("用户"),
+    status_codes(200, 401, 500),
+    responses(
+        (status_code = 200, description = "获取用户绑定的企业信息", body = EnterpriseInfoResponse),
+        (status_code = 401, description = "用户未认证"),
+        (status_code = 500, description = "内部服务器错误"),
+    )
+)]
+pub async fn get_enterprise_info(depot: &mut Depot) -> Res<EnterpriseInfoResponse> {
+    // 1. 获取已认证用户的地址（由auth_token中间件插入）
+    let user_address = match depot.get::<String>("user_address") {
+        Ok(address_ref) => {
+            address_ref.as_str()
+        },
+        Err(e) => {
+            log::error!("Authenticated user address not found or wrong type in depot: {:?}", e);
+            return Err(res_json_err("User not authenticated"));
+        }
+    };
+
+    // 2. 获取依赖
+    let mongodb = depot.obtain::<Arc<Database>>().expect("Database connection not found").clone();
+    let user_repo = UserRepository::new(&mongodb);
+    let enterprise_repo = EnterpriseRepository::new(&mongodb);
+
+    // 3. 查找用户
+    let user = match user_repo.find_by_wallet_address(user_address).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            error!("Authenticated user not found in database: {}", user_address);
+            return Err(res_json_custom(500, "AuthenticatedUserNotFound"));
+        },
+        Err(e) => {
+            error!("Database error finding user by address {}: {}", user_address, e);
+            return Err(res_json_custom(500, "DatabaseError"));
+        }
+    };
+
+    // 4. 检查用户是否绑定了企业
+    if let Some(enterprise_id) = user.enterprise_id {
+        // 5. 如果绑定了企业，获取企业信息
+        match enterprise_repo.find_by_id(enterprise_id).await {
+            Ok(Some(enterprise)) => {
+                let response = EnterpriseInfoResponse {
+                    is_enterprise_bound: true,
+                    enterprise_name: Some(enterprise.name),
+                    enterprise_address: Some(enterprise.wallet_address),
+                    enterprise_id: Some(enterprise_id.to_string()),
+                };
+                Ok(res_json_ok(Some(response)))
+            },
+            Ok(None) => {
+                // 找到了用户绑定的企业ID，但企业不存在
+                warn!("Enterprise with ID {} bound to user {} not found", enterprise_id, user_address);
+                let response = EnterpriseInfoResponse {
+                    is_enterprise_bound: true,
+                    enterprise_name: None,
+                    enterprise_address: None,
+                    enterprise_id: Some(enterprise_id.to_string()),
+                };
+                Ok(res_json_ok(Some(response)))
+            },
+            Err(e) => {
+                error!("Database error finding enterprise by ID {}: {}", enterprise_id, e);
+                return Err(res_json_custom(500, "DatabaseError"));
+            }
+        }
+    } else {
+        // 6. 如果未绑定企业，返回未绑定状态
+        let response = EnterpriseInfoResponse {
+            is_enterprise_bound: false,
+            enterprise_name: None,
+            enterprise_address: None,
+            enterprise_id: None,
+        };
+        Ok(res_json_ok(Some(response)))
     }
 }
 

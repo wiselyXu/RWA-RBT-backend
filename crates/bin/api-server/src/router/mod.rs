@@ -24,6 +24,8 @@ use salvo::{
 use service::invoice::InvoiceService; // Import InvoiceService
 use service::service::PurchaseService; // Import PurchaseService
 use service::cache::InvoiceRedisService;
+use service::repository::{TokenRepository, InvoiceRepository, EnterpriseRepository, UserRepository};
+use service::service::TokenService;
 use std::{env, sync::Arc};
 use pharos_interact::{InvoiceContract, ContractQuerier, ContractWriter}; // Import for contract interaction
 use ethers::middleware::SignerMiddleware;
@@ -35,7 +37,7 @@ pub mod router;
 use router::{
     init_user_router, init_enterprise_router, init_invoice_router, 
     init_purchase_router, init_admin_router, init_transaction_router, 
-    init_interest_router
+    init_interest_router, init_token_router
 }; 
 
 // --- Injection Middleware Struct ---
@@ -46,6 +48,7 @@ struct InjectConnections {
     contract: Option<Arc<InvoiceContract<SignerMiddleware<Provider<Http>, LocalWallet>>>>, // Contract connection
     invoice_service: Arc<InvoiceService>, // Add InvoiceService
     purchase_service: Arc<PurchaseService>, // Add PurchaseService
+    token_service: Arc<TokenService>, // Add TokenService
 }
 
 #[async_trait]
@@ -55,6 +58,7 @@ impl Handler for InjectConnections {
         depot.inject(self.redis_client.clone());
         depot.inject(self.invoice_service.clone()); // Inject InvoiceService
         depot.inject(self.purchase_service.clone()); // Inject PurchaseService
+        depot.inject(self.token_service.clone()); // Inject TokenService
         
         // Inject contract connection if available
         if let Some(contract) = &self.contract {
@@ -83,7 +87,8 @@ pub fn init_router() -> Router {
         .push(init_purchase_router()) // Add RWA purchase routes
         .push(init_admin_router()) // Add admin routes
         .push(init_transaction_router()) // Add transaction routes 
-        .push(init_interest_router()); // Add interest routes
+        .push(init_interest_router()) // Add interest routes
+        .push(init_token_router()); // Add token routes
 
 
     let router = router.push(api_router);
@@ -127,9 +132,19 @@ pub fn init_service(
     // Create PurchaseService instance
     let purchase_service = Arc::new(PurchaseService::new(Arc::new(mongodb.client().clone()), redis_service));
 
-    // Setup scheduled tasks (ensure this runs only once)
-    // Might be better to do this in main.rs after service creation
-    // service::invoice::setup_scheduled_tasks(invoice_service.clone()); 
+    // Create repositories for the TokenService
+    let token_repository = Arc::new(TokenRepository::new(mongodb.clone()));
+    let invoice_repository = Arc::new(InvoiceRepository::new(&mongodb));
+    let enterprise_repository = Arc::new(EnterpriseRepository::new(&mongodb));
+    let user_repository = Arc::new(UserRepository::new(&mongodb));
+    
+    // Create TokenService instance
+    let token_service = Arc::new(TokenService::new(
+        token_repository,
+        invoice_repository,
+        enterprise_repository,
+        user_repository
+    ));
 
     // Create the injector instance
     let injector = InjectConnections {
@@ -138,6 +153,7 @@ pub fn init_service(
         contract,
         invoice_service, // Inject the created service
         purchase_service, // Inject the PurchaseService
+        token_service, // Inject the TokenService
     };
 
     // Apply CORS, then injection, then catcher, then router

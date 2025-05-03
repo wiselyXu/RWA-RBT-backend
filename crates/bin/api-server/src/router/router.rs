@@ -1,7 +1,8 @@
 use salvo::Router;
 
-use crate::controller::{common_controller, enterprise_controller, invoice_controller, user_controller, purchase_controller, transaction_controller, interest_controller};
-
+use crate::controller::{
+    common_controller, enterprise_controller, interest_controller, invoice_controller, purchase_controller, token_controller, transaction_controller, user_controller,
+};
 
 pub fn init_user_router() -> Router {
     let router = Router::with_path("/user");
@@ -11,11 +12,16 @@ pub fn init_user_router() -> Router {
         .push(Router::with_path("/challenge").post(user_controller::challenge))
         .push(Router::with_path("/login").post(user_controller::login))
         // 绑定企业路由 (需要认证)
-        .hoop(common_controller::auth_token)
         .push(
             Router::with_path("/bind-enterprise")
                 .hoop(common_controller::auth_token)
                 .post(user_controller::bind_enterprise),
+        )
+        // 获取用户绑定的企业信息路由 (需要认证)
+        .push(
+            Router::with_path("/enterprise-info")
+                .hoop(common_controller::auth_token)
+                .get(user_controller::get_enterprise_info),
         )
 }
 
@@ -27,7 +33,7 @@ pub fn init_enterprise_router() -> Router {
         .push(Router::with_path("/del").delete(enterprise_controller::delete_enterprise))
         .push(
             Router::with_path("/create")
-                .hoop(common_controller::auth_token)
+                // .hoop(common_controller::auth_token)
                 .post(enterprise_controller::create_enterprise),
         )
 }
@@ -41,7 +47,7 @@ pub fn init_invoice_router() -> Router {
         .push(
             Router::with_path("/holding/interest-details")
                 .hoop(common_controller::auth_token)
-                .get(invoice_controller::get_holding_interest_details)
+                .get(invoice_controller::get_holding_interest_details),
         )
 }
 
@@ -52,7 +58,7 @@ pub fn init_purchase_router() -> Router {
             Router::new()
                 .hoop(common_controller::auth_token)
                 .push(Router::with_path("/purchase").post(purchase_controller::purchase_invoice))
-                .push(Router::with_path("/holdings").get(purchase_controller::list_my_holdings))
+                .push(Router::with_path("/holdings").get(purchase_controller::list_my_holdings)),
         )
 }
 
@@ -79,4 +85,18 @@ pub fn init_interest_router() -> Router {
         .hoop(common_controller::auth_token) // 所有利息查询接口都需要认证
         .push(Router::with_path("/list").get(interest_controller::list_user_interest_accruals))
         .push(Router::with_path("/by-holding").get(interest_controller::list_holding_interest_accruals))
+}
+
+// 新增 Token 相关路由
+pub fn init_token_router() -> Router {
+    Router::with_path("/token")
+        .push(Router::with_path("/market").get(token_controller::list_token_markets))
+        .push(Router::with_path("/list").get(token_controller::list_token_batches))
+        .push(
+            Router::new()
+                .hoop(common_controller::auth_token) // Token routes requiring authentication
+                .push(Router::with_path("/batch/create").post(token_controller::create_token_batch))
+                .push(Router::with_path("/purchase").post(token_controller::purchase_tokens))
+                .push(Router::with_path("/holdings").get(token_controller::get_user_token_holdings)),
+        )
 }

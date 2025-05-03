@@ -1,4 +1,28 @@
 services:
+  web:
+    build:
+      context: ./web
+      dockerfile: ./Dockerfile
+    container_name: web
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: 500m
+    networks:
+      solar:
+        ipv4_address: 172.8.0.20
+    ports:
+      - "8080:8080"  # host物理直接映射端口为13306
+    volumes:
+      - /etc/timezone:/etc/timezone
+      - /etc/localtime:/etc/localtime
+    #    depends_on:
+    #      - config
+    environment:
+      TZ: Asia/Shanghai
+
+
   server:
     build:
       context: .
