@@ -1,54 +1,64 @@
-# React + TypeScript + Vite
+# RBT Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This is the frontend for the RBT (Real-World Assets Token) platform.
 
-Currently, two official plugins are available:
+## Setup and Running with API Proxy
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+To properly connect to the backend API at `http://127.0.0.1:8888/rwa`, follow these steps:
 
-## Expanding the ESLint configuration
+### Option 1: Using the start script
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+1. Make the start script executable:
+   ```bash
+   chmod +x start.sh
+   ```
 
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
-```
+2. Run the start script:
+   ```bash
+   ./start.sh
+   ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+This will automatically:
+- Install the http-proxy-middleware package if needed
+- Start the development server with the proper proxy configuration
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Option 2: Manual setup
 
-export default tseslint.config({
-  plugins: {
-    // Add the react-x and react-dom plugins
-    'react-x': reactX,
-    'react-dom': reactDom,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended typescript rules
-    ...reactX.configs['recommended-typescript'].rules,
-    ...reactDom.configs.recommended.rules,
-  },
-})
-```
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+2. Start the development server:
+   ```bash
+   npm start
+   ```
+
+The proxy is configured in `src/setupProxy.js` to forward all `/rwa` requests to the backend at `http://127.0.0.1:8888/rwa`.
+
+## Testing API Connectivity
+
+1. After starting the application, navigate to the homepage
+2. Toggle the "显示API调试工具" switch at the top of the page
+3. Use the API Test Component to check that the connection to the backend is working properly
+
+## Authentication Flow
+
+This application implements Web3 authentication with the following flow:
+
+1. User connects their wallet (MetaMask, OKX, or others)
+2. Application requests a challenge from the backend `/rwa/user/challenge` endpoint
+3. User signs the challenge with their wallet
+4. Application sends the signature to the backend `/rwa/user/login` endpoint
+5. If valid, the backend returns a JWT token
+6. Application stores the token and uses it for all subsequent authenticated requests
+
+## Troubleshooting
+
+If you encounter API connectivity issues:
+
+1. Make sure the backend is running at http://127.0.0.1:8888
+2. Check browser console for any error messages
+3. Verify the API endpoint paths in the request URLs
+4. Ensure setupProxy.js is correctly configured
+5. Try restarting the development server

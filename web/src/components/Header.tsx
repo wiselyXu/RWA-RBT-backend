@@ -1,95 +1,167 @@
-import React from 'react';
-import { useWallet } from '../hooks/useWallet'; // Adjust path if needed
+import React, { useState } from 'react';
+import {
+  Box,
+  Button,
+  Menu,
+  MenuItem,
+  AppBar,
+  Toolbar,
+} from '@mui/material';
+// 引入 Link 组件
+import { Link } from 'react-router-dom';
+// 导入 logo
+import Logo from '../assets/logo.svg';
+import WalletConnect from './WalletConnect';
+import { useAuth, UserRole } from '../context/AuthContext';
 
-// Basic styling (consider moving to a CSS file)
-const headerStyle: React.CSSProperties = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  padding: '1rem 2rem',
-  backgroundColor: '#282c34',
-  color: 'white',
-  position: 'sticky', // Make header sticky
-  top: 0, // Stick to the top
-  zIndex: 1000, // Ensure it's above other content
-};
-
-const navStyle: React.CSSProperties = {
-  display: 'flex',
-  gap: '1rem',
-};
-
-const buttonStyle: React.CSSProperties = {
-  padding: '0.5rem 1rem',
-  cursor: 'pointer',
-  backgroundColor: '#61dafb',
-  border: 'none',
-  borderRadius: '4px',
-  color: '#282c34',
-  fontWeight: 'bold',
-};
-
-const disabledButtonStyle: React.CSSProperties = {
-    ...buttonStyle,
-    cursor: 'not-allowed',
-    opacity: 0.6,
-};
-
-const addressStyle: React.CSSProperties = {
-    backgroundColor: '#444',
-    padding: '0.5rem 1rem',
-    borderRadius: '4px',
-    fontFamily: 'monospace',
-    marginRight: '1rem', // Add space before disconnect button
-};
-
-const errorStyle: React.CSSProperties = {
-    color: 'red',
-    fontSize: '0.8rem',
-    marginTop: '0.5rem',
-    textAlign: 'right',
-    position: 'absolute',
-    top: '4rem', // Position below the header
-    right: '2rem',
-    maxWidth: '300px' // Prevent error message from being too wide
+// 定义菜单项接口
+interface SubMenuItem {
+  label: string;
+  path: string;
 }
 
-export const Header: React.FC = () => {
-  const { address, token, isLoading, error, connectWallet, disconnectWallet } = useWallet();
+interface MenuItem {
+  label: string;
+  path: string;
+  subItems?: SubMenuItem[];
+}
 
-  // Function to shorten address
-  const shortenAddress = (addr: string) => `${addr.substring(0, 6)}...${addr.substring(addr.length - 4)}`;
+// 首页菜单数据 - 所有用户可见
+const commonMenuItems: MenuItem[] = [
+  {
+    label: '首页',
+    path: '/',
+  },
+  {
+    label: 'Token市场',
+    path: '/token-market',
+  },
+  {
+    label: '我的token',
+    path: '/my-tokens',
+  },
+];
+
+// 企业用户菜单项 - 只有绑定了企业的用户可见
+const enterpriseMenuItems: MenuItem[] = [
+  {
+    label: '我的债权',
+    path: '/my-credits',
+    subItems: [
+      { label: '我的票据', path: '/my-credits/my-bills' },
+      { label: '票据管理', path: '/my-credits/invoices' },
+      { label: '我发行的 token', path: '/my-credits/my-issued-tokens' }, 
+    ],
+  },
+  {
+    label: '我的债务',
+    path: '/my-debts',
+    subItems: [
+      { label: '待我签名', path: '/my-debts/my-todolist' },
+      { label: '偿还债务', path: '/my-debts/repay-debt' }, 
+    ],
+  },
+];
+
+const Header: React.FC = () => {
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const { userInfo } = useAuth();
+
+  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>, menuLabel: string) => {
+    setAnchorEl(event.currentTarget);
+    setActiveMenu(menuLabel);
+  };
+
+  const handleMenuClose = () => {
+    setAnchorEl(null);
+    setActiveMenu(null);
+  };
+
+  // 根据用户角色确定显示哪些菜单项
+  const getMenuItems = (): MenuItem[] => {
+    let menuItems = [...commonMenuItems];
+    
+    // 如果用户绑定了企业，添加企业菜单项
+    if (userInfo?.isEnterpriseBound) {
+      menuItems = [...menuItems, ...enterpriseMenuItems];
+    }
+    
+    return menuItems;
+  };
 
   return (
-    <header style={headerStyle}>
-      <div>Pharos RWA Platform</div> {/* Placeholder for Logo/Title */}
-      <div style={{ textAlign: 'right'}}> {/* Wrapper for button and error */} 
-        <nav style={navStyle}>
-          {/* Placeholder Nav Links - Consider using React Router for navigation */}
-          <a href="#" style={{ color: 'white' }}>首页</a>
-          <a href="#" style={{ color: 'white' }}>帮助中心</a>
-
-          {address && token ? (
-              <div style={{display: 'flex', alignItems: 'center'}}>
-                  <span style={addressStyle} title={address}>
-                      {shortenAddress(address)}
-                  </span>
-                  <button onClick={disconnectWallet} style={buttonStyle}>
-                    断开连接
-                  </button>
-              </div>
-          ) : (
-            <button 
-              onClick={connectWallet} 
-              disabled={isLoading} 
-              style={isLoading ? disabledButtonStyle : buttonStyle}
-            >
-              {isLoading ? '连接中...' : address ? '登录中...' : '连接钱包'} {/* Show intermediate state */} 
-            </button>
-          )}
-        </nav>
-        {error && <div style={errorStyle}>Error: {error}</div>} {/* Improved error display */} 
-      </div>
-    </header>
+    <AppBar position="static" sx={{ backgroundColor: 'transparent', boxShadow: 'none' }}>
+      <Toolbar sx={{ p: 0, display: 'flex', justifyContent: 'space-between' }}>
+        {/* Logo 部分无背景 */}
+        <Box sx={{ p: 1 }}>
+          <Link to="/">
+            <img src={Logo} alt="Logo" height="40" />
+          </Link>
+        </Box>
+        
+        {/* 渐变背景导航菜单 */}
+        <Box
+          sx={{
+            display: { xs: 'none', md: 'flex' },
+            flexGrow: 1,
+            justifyContent: 'center',
+            background: 'linear-gradient(90deg, #e3f2fd 0%, #1976d2 100%)',
+            p: 1,
+            mx: 2,
+            borderRadius: '4px',
+          }}
+        >
+          {getMenuItems().map((item) => (
+            item.subItems ? (
+              <React.Fragment key={item.label}>
+                <Button 
+                  color="inherit" 
+                  onClick={(e) => handleMenuOpen(e, item.label)}
+                >
+                  {item.label}
+                </Button>
+                <Menu
+                  anchorEl={anchorEl}
+                  open={Boolean(anchorEl) && activeMenu === item.label}
+                  onClose={handleMenuClose}
+                >
+                  {item.subItems.map((subItem) => (
+                    <MenuItem
+                      key={subItem.label}
+                      component={Link}
+                      to={subItem.path}
+                      onClick={handleMenuClose}
+                    >
+                      {subItem.label}
+                    </MenuItem>
+                  ))}
+                </Menu>
+              </React.Fragment>
+            ) : (
+              <Button 
+                key={item.label} 
+                color="inherit" 
+                component={Link} 
+                to={item.path}
+              >
+                {item.label}
+              </Button>
+            )
+          ))}
+        </Box>
+        
+        {/* 钱包连接区域 */}
+        <Box>
+          <WalletConnect 
+            position="relative" 
+            top={0} 
+            right={0} 
+          />
+        </Box>
+      </Toolbar>
+    </AppBar>
   );
-}; 
+};
+
+export default Header;

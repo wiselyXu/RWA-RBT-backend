@@ -12,11 +12,16 @@ pub fn init_user_router() -> Router {
         .push(Router::with_path("/challenge").post(user_controller::challenge))
         .push(Router::with_path("/login").post(user_controller::login))
         // 绑定企业路由 (需要认证)
-        .hoop(common_controller::auth_token)
         .push(
             Router::with_path("/bind-enterprise")
                 .hoop(common_controller::auth_token)
                 .post(user_controller::bind_enterprise),
+        )
+        // 获取用户绑定的企业信息路由 (需要认证)
+        .push(
+            Router::with_path("/enterprise-info")
+                .hoop(common_controller::auth_token)
+                .get(user_controller::get_enterprise_info),
         )
 }
 
@@ -28,7 +33,7 @@ pub fn init_enterprise_router() -> Router {
         .push(Router::with_path("/del").delete(enterprise_controller::delete_enterprise))
         .push(
             Router::with_path("/create")
-                .hoop(common_controller::auth_token)
+                // .hoop(common_controller::auth_token)
                 .post(enterprise_controller::create_enterprise),
         )
 }
