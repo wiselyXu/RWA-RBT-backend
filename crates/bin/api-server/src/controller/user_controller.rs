@@ -183,7 +183,7 @@ pub async fn login(req: JsonBody<LoginRequest>, depot: &mut Depot, request: &mut
     info!("Successfully recovered address: {}", recovered_address_str);
 
     // 5. Process user login (find or create user based on recovered address)
-    let _user = match user_repo.process_login(&recovered_address_str).await {
+    let user = match user_repo.process_login(&recovered_address_str).await {
         Ok(db_user) => {
             info!("Processed login for user: {}", recovered_address_str);
             db_user // Keep the user object if needed later, otherwise ignore
@@ -201,9 +201,18 @@ pub async fn login(req: JsonBody<LoginRequest>, depot: &mut Depot, request: &mut
     let expiration_time = now + chrono::Duration::days(1);
     let exp_timestamp = expiration_time.timestamp() as usize;
 
+    // Convert user role to string
+    let role_str = match user.role {
+        common::domain::entity::UserRole::Investor => "investor",
+        common::domain::entity::UserRole::EnterpriseAdmin => "creditor",
+        common::domain::entity::UserRole::PlatformAdmin => "admin",
+    };
+
     let claims = Claims {
         sub: recovered_address_str.clone(), // Use recovered address as subject
         exp: exp_timestamp,
+        user_id: user.id.unwrap().to_hex(), // Add user_id field
+        role: role_str.to_string(), // Add role field
     };
 
     // Retrieve the secret key from configuration
