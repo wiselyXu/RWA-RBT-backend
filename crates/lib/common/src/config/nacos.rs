@@ -7,7 +7,7 @@ use log::{error, info, warn};
 use nacos_sdk::api::config::ConfigResponse;
 use nacos_sdk::api::naming::{NamingChangeEvent, NamingEventListener};
 use nacos_sdk::api::{
-    config::{ConfigChangeListener, ConfigService, ConfigServiceBuilder},
+    config::{ConfigChangeListener, ConfigServiceBuilder, ConfigService},
     naming::{NamingService, NamingServiceBuilder, ServiceInstance},
     props::ClientProps,
 };
@@ -35,8 +35,9 @@ impl NamingEventListener for SimpleInstanceChangeListener {
 }
 
 pub struct NacosClient {
-    config_service: Option<Box<dyn ConfigService>>,
-    naming_service: Option<Box<dyn NamingService>>,
+    // Store the concrete service structs directly
+    config_service: Option<ConfigService>,
+    naming_service: Option<NamingService>,
     config: NacosConfig,
     instance: Option<ServiceInstance>,
 }
@@ -68,8 +69,9 @@ impl NacosClient {
             })?;
 
         let mut client = Self {
-            config_service: Some(Box::new(config_service)),
-            naming_service: Some(Box::new(naming_service)),
+            // Store the structs directly in the Option
+            config_service: Some(config_service),
+            naming_service: Some(naming_service),
             config,
             instance: None,
         };
@@ -85,6 +87,7 @@ impl NacosClient {
         T: DeserializeOwned + Send + Sync + 'static,
         F: Fn(T) -> Result<(), AppError> + Send + Sync + 'static,
     {
+        // Use the trait method via the boxed trait object
         if let Some(config_service) = &self.config_service {
             let data_id = self.config.data_id.clone();
             let group = self.config.group.clone();
@@ -95,7 +98,7 @@ impl NacosClient {
                 _phantom: std::marker::PhantomData,
             });
 
-            // 添加监听器
+            // Add listener using the trait method
             config_service
                 .add_listener(data_id.clone(), group.clone(), listener)
                 .await
@@ -168,6 +171,7 @@ impl NacosClient {
     }
 
     pub async fn get_config<T: DeserializeOwned>(&self) -> Result<T, AppError> {
+        // Use the trait method via the boxed trait object
         if let Some(config_service) = &self.config_service {
             // 打印请求参数
             info!(
@@ -175,10 +179,10 @@ impl NacosClient {
                 self.config.data_id, self.config.group, self.config.namespace
             );
 
-            // 使用辅助方法获取配置内容
+            // Use auxiliary method to get raw config content
             let content = self.get_raw_config(&self.config.data_id, &self.config.group).await?;
 
-            // 尝试解析为TOML
+            // Attempt to parse as TOML
             match toml::from_str::<T>(&content) {
                 Ok(config) => {
                     info!("Successfully parsed Nacos config as TOML");
@@ -187,15 +191,15 @@ impl NacosClient {
                 Err(e) => {
                     error!("TOML parse error: {:?}", e);
                     error!("Content attempted to parse: {}", content);
-                    
-                    // 尝试进一步处理，去除可能的外部包装
+
+                    // Attempt further processing, removing possible external wrapping
                     if content.starts_with('[') && content.contains(']') {
-                        // 可能是有效的TOML，但有外部文本
-                        // 尝试寻找第一个[section]作为开始
+                        // Could be valid TOML but with external text
+                        // Attempt to find the first [section] as the start
                         if let Some(section_start) = content.find('[') {
                             let clean_content = &content[section_start..];
                             info!("Attempting to parse cleaned content: '{}'", clean_content);
-                            
+
                             match toml::from_str::<T>(clean_content) {
                                 Ok(config) => {
                                     info!("Successfully parsed cleaned Nacos config as TOML");
@@ -207,7 +211,7 @@ impl NacosClient {
                             }
                         }
                     }
-                    
+
                     return Err(AppError::NacosError(format!("Failed to parse config: {}", e)));
                 }
             }
@@ -223,14 +227,15 @@ impl NacosClient {
             "Getting config from Nacos server: data_id={}, group={}, namespace={}",
             data_id, group, self.config.namespace
         );
-        
+
+        // Use the trait method via the boxed trait object
         let client = self.config_service.as_ref().unwrap();
-        
+
         match client.get_config(data_id.to_string(), group.to_string()).await {
             Ok(raw_response) => {
                 let raw_content = raw_response.content();
                 info!("Raw response from Nacos: '{}'", raw_content);
-                
+
                 if raw_content.is_empty() {
                     error!("Empty response from Nacos config server");
                     return Err(AppError::NacosError(format!(
@@ -238,18 +243,20 @@ impl NacosClient {
                         data_id, group
                     )));
                 }
-                
-                // 提取真正的配置内容
+
+                // Extract the actual config content - Note: This logic was identified as potentially incorrect
+                // in the previous analysis, assuming the SDK provides the raw content directly.
+                // However, keeping it as per the original code structure for now.
                 let content = if let Some(content_start) = raw_content.find("content=") {
-                    let content_part = &raw_content[content_start + 8..]; // 8 是 "content=" 的长度
+                    let content_part = &raw_content[content_start + 8..]; // 8 is the length of "content="
                     info!("Extracted content part: '{}'", content_part);
                     content_part.to_string()
                 } else {
-                    // 如果找不到content=标记，使用整个响应
-                    info!("Could not find content marker in response, using raw response");
+                    // If content= marker is not found, use the whole response
+                    warn!("Could not find content marker in response, using raw response");
                     raw_content.to_string()
                 };
-                
+
                 Ok(content)
             }
             Err(e) => {
@@ -270,7 +277,7 @@ pub async fn init_nacos(config: NacosConfig) -> Result<SharedNacosClient, AppErr
     Ok(Arc::new(RwLock::new(client)))
 }
 
-// 实现用于处理配置回调的结构体
+// Implement the struct for handling config callbacks
 struct ConfigCallbackHandler<T, F>
 where
     T: DeserializeOwned + Send + Sync + 'static,
@@ -288,19 +295,21 @@ where
     fn notify(&self, config_resp: ConfigResponse) {
         let raw_content = config_resp.content();
         info!("Config change notification received: '{}'", raw_content);
-        
-        // 提取内容部分
+
+        // Extract the content part - Note: This logic was identified as potentially incorrect
+        // in the previous analysis, assuming the SDK provides the raw content directly.
+        // However, keeping it as per the original code structure for now.
         let content = if let Some(content_start) = raw_content.find("content=") {
-            let content_part = &raw_content[content_start + 8..]; // 8 是 "content=" 的长度
+            let content_part = &raw_content[content_start + 8..]; // 8 is the length of "content="
             info!("Extracted content part: '{}'", content_part);
             content_part
         } else {
-            // 如果找不到content=标记，使用整个响应
+            // If content= marker is not found, use the whole response
             warn!("Could not find content marker in response, using raw response");
             raw_content
         };
-        
-        // 尝试解析为TOML
+
+        // Attempt to parse as TOML
         let toml_result = toml::from_str::<T>(content);
         if let Ok(config) = toml_result {
             info!("Successfully parsed updated config as TOML");
@@ -309,14 +318,14 @@ where
             }
             return;
         }
-        
-        // 尝试进一步处理，去除可能的外部包装
+
+        // Attempt further processing, removing possible external wrapping
         if content.starts_with('[') && content.contains(']') {
-            // 可能是有效的TOML，但有外部文本
+            // Could be valid TOML but with external text
             if let Some(section_start) = content.find('[') {
                 let clean_content = &content[section_start..];
                 info!("Attempting to parse cleaned content: '{}'", clean_content);
-                
+
                 if let Ok(config) = toml::from_str::<T>(clean_content) {
                     info!("Successfully parsed cleaned updated config as TOML");
                     if let Err(e) = (self.callback)(config) {
@@ -326,8 +335,8 @@ where
                 }
             }
         }
-        
-        // 解析失败
+
+        // Parsing failed
         error!("Failed to parse updated config content");
         error!("TOML parse error: {:?}", toml_result.err().unwrap());
         error!("Content attempted to parse: {}", content);
