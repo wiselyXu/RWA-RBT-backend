@@ -30,11 +30,11 @@ impl TryFrom<InvoiceDataDto> for InvoiceData {
             invoice_number: val.invoice_number,
             payee: val.payee.parse::<Address>().context("Invalid payee address format")?,
             payer: val.payer.parse::<Address>().context("Invalid payer address format")?,
-            amount: U256::from_dec_str(&val.amount).context("Invalid amount format")?,
-            ipfs_hash: val.ipfs_hash,
-            contract_hash: val.contract_hash,
+            amount: U256::from_dec_str (&val.amount.to_string()).context("Invalid amount")?,
+            ipfs_hash: val.invoice_ipfs_hash,
+            contract_hash: val.contract_ipfs_hash,
             timestamp:U256::from_dec_str(&get_current_timestamp_nanos().to_string())?,
-            due_date: U256::from_dec_str(&val.due_date).context("Invalid due date format")?,
+            due_date: U256::from_dec_str(&val.due_date.to_string()).context("Invalid due date format")?,
             token_batch: "val.token_batch.".to_string(),
             is_cleared: false,
             is_valid: false,
@@ -48,11 +48,11 @@ impl From<InvoiceData> for InvoiceDataDto {
             invoice_number: val.invoice_number,
             payee: format!("{:?}", val.payee), // Convert Address to hex string
             payer: format!("{:?}", val.payer), // Convert Address to hex string
-            amount: val.amount.to_string(),    // Convert U256 to string
-            ipfs_hash: val.ipfs_hash,
-            contract_hash: val.contract_hash,
-            due_date: val.due_date.to_string(),   // Convert U256 to string
-            currency: "CNY".to_string(),
+            amount: val.amount.as_u64(),    // Convert U256 to string
+            invoice_ipfs_hash: val.ipfs_hash,
+            contract_ipfs_hash: val.contract_hash,
+            due_date: val.due_date.as_u64() as i64,   // Convert U256 to string
+            currency: "".to_string(),
         }
     }
 }

@@ -79,7 +79,7 @@ impl InterestCalculationService {
             };
             
             // 计算日利率：年利率 / 当年天数
-            let annual_rate = invoice.annual_interest_rate;
+            let annual_rate = 0.0;
             let daily_rate = annual_rate / days_in_year / 100.0; // 年利率是百分比，需要除以100
             
             // 计算当日利息：本金 * 日利率

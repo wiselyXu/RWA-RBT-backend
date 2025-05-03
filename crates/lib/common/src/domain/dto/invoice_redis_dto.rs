@@ -1,9 +1,10 @@
 use std::cmp::PartialEq;
 use serde::{Deserialize, Serialize};
 use chrono::NaiveDate;
-use crate::domain::entity::InvoiceStatus;
+
 use mongodb::bson::{oid::ObjectId, DateTime};
 use salvo::oapi::ToSchema;
+use crate::domain::entity::invoice_status::InvoiceStatus;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct InvoiceRedisDto {
@@ -33,7 +34,7 @@ impl InvoiceRedisDto {
     }
     
     pub fn is_available_for_purchase(&self) -> bool {
-        self.status == InvoiceStatus::OnSale && self.available_shares > 0
+        self.status == InvoiceStatus::Packaged && self.available_shares > 0
     }
     
     pub fn update_available_shares(&mut self, purchased_shares: u64) -> Result<(), String> {
@@ -48,9 +49,8 @@ impl InvoiceRedisDto {
         
         // 如果可用份数为0，则将状态更新为售罄
         if self.available_shares == 0 {
-            self.status = InvoiceStatus:: SoldOut;
+            self.status = InvoiceStatus::Repaid;
         }
-        
         Ok(())
     }
 }

@@ -4,6 +4,7 @@ module.exports = function(app) {
   app.use(
     '/rwa',
     createProxyMiddleware({
+      //target: 'http://43.134.99.111:8888',
       target: 'http://127.0.0.1:8888',
       changeOrigin: true,
       pathRewrite: {

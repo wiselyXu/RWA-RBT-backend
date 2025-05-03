@@ -309,46 +309,46 @@ const WalletConnect: React.FC<WalletConnectProps> = ({
   const renderWalletButton = () => {
     if (isConnected && walletAddress) {
       // Connected wallet display
-      return (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Box
-            sx={{
-              width: 24,
-              height: 24,
-              borderRadius: '50%',
-              bgcolor: 'rgba(255, 255, 255, 0.2)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              position: 'relative',
-              '&::before': {
-                content: '""',
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
+  return (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box
+              sx={{
+                width: 24,
+                height: 24,
                 borderRadius: '50%',
-                border: '2px solid rgba(255, 255, 255, 0.5)',
-                borderTop: 'none',
-                borderLeft: 'none',
-                borderRight: 'none',
-              },
-            }}
-          >
-            <WalletIcon sx={{ fontSize: 16, color: '#fff' }} />
+                bgcolor: 'rgba(255, 255, 255, 0.2)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                position: 'relative',
+                '&::before': {
+                  content: '""',
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  borderRadius: '50%',
+                  border: '2px solid rgba(255, 255, 255, 0.5)',
+                  borderTop: 'none',
+                  borderLeft: 'none',
+                  borderRight: 'none',
+                },
+              }}
+            >
+              <WalletIcon sx={{ fontSize: 16, color: '#fff' }} />
+            </Box>
+            <Typography sx={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {`${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`}
+            </Typography>
           </Box>
-          <Typography sx={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {`${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`}
-          </Typography>
-        </Box>
       );
     } else {
       // Connect button for non-connected state
       return isLoading ? (
         <CircularProgress size={24} color="inherit" />
-      ) : (
-        'Connect Wallet'
+        ) : (
+          'Connect Wallet'
       );
     }
   };

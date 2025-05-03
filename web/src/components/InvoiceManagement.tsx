@@ -28,16 +28,7 @@ import { useAuth } from '../context/AuthContext';
 import InvoiceService, { Invoice } from '../services/invoiceService';
 import Layout from './Layout';
 import CreateInvoiceDialog from './CreateInvoiceDialog';
-
-// Helper function to format date string
-const formatDate = (dateString: string) => {
-  if (!dateString) return 'N/A';
-  try {
-    return new Date(dateString).toLocaleDateString();
-  } catch (e) {
-    return dateString; // Return original string if parsing fails
-  }
-};
+import { formatDate } from '../utils/dateUtils'; // 导入日期工具函数
 
 const InvoiceManagement: React.FC = () => {
   const { userInfo } = useAuth();
@@ -70,10 +61,10 @@ const InvoiceManagement: React.FC = () => {
     fetchInvoices();
   }, [refreshTrigger]); // 当refreshTrigger变化时，重新获取数据
 
-  // 搜索过滤 (Updated to use debtor_id or payer if available)
+  // 搜索过滤 (使用payee和payer字段)
   const filteredInvoices = invoices.filter((invoice: Invoice) => 
     invoice.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (invoice.debtor_id && invoice.debtor_id.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (invoice.payee && invoice.payee.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (invoice.payer && invoice.payer.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
@@ -120,7 +111,7 @@ const InvoiceManagement: React.FC = () => {
     }
   };
 
-  // 获取票据状态显示 (Handles case variations)
+  // 获取票据状态显示 (与后端状态中文描述保持一致)
   const getStatusChip = (status?: string) => {
     if (!status) return <Chip label="未知" size="small" />;
     
@@ -128,11 +119,21 @@ const InvoiceManagement: React.FC = () => {
     
     switch (lowerCaseStatus) {
       case 'pending':
-        return <Chip label="待处理" color="warning" size="small" />;
+        return <Chip label="未上链" color="warning" size="small" />;
       case 'verified':
-        return <Chip label="已验证" color="success" size="small" />;
+        return <Chip label="已上链" color="success" size="small" />;
+      case 'packaged':
+        return <Chip label="已包含在发票批次中" color="info" size="small" />;
       case 'repaid':
-        return <Chip label="已偿还" color="info" size="small" />;
+        return <Chip label="已清算" color="success" size="small" />;
+      case 'overdue':
+        return <Chip label="已逾期" color="error" size="small" />;
+      case 'defaulted':
+        return <Chip label="已违约" color="error" size="small" />;
+      case 'onsale':
+        return <Chip label="在售" color="primary" size="small" />;
+      case 'soldout':
+        return <Chip label="已售出" color="secondary" size="small" />;
       default:
         // Capitalize first letter for display
         const displayStatus = status.charAt(0).toUpperCase() + status.slice(1);
@@ -147,6 +148,21 @@ const InvoiceManagement: React.FC = () => {
     return `${address.substring(0, 8)}...${address.substring(address.length - 6)}`;
   }
 
+  // 生成IPFS预览链接
+  const getIpfsLink = (ipfsHash?: string) => {
+    if (!ipfsHash) return 'N/A';
+    return (
+      <a 
+        href={`https://ipfs.io/ipfs/${ipfsHash}`} 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        style={{ textDecoration: 'none' }}
+      >
+        {shortenAddress(ipfsHash)}
+      </a>
+    );
+  };
+
   return (
     <Layout>
       <Box sx={{ p: 3 }}>
@@ -158,7 +174,7 @@ const InvoiceManagement: React.FC = () => {
         {userInfo?.isEnterpriseBound ? (
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
             <TextField
-              placeholder="搜索票据编号或债务方ID"
+              placeholder="搜索票据编号或债权人/债务人地址"
               variant="outlined"
               size="small"
               value={searchTerm}
@@ -203,11 +219,13 @@ const InvoiceManagement: React.FC = () => {
               <TableHead>
                 <TableRow>
                   <TableCell>票据编号</TableCell>
-                  <TableCell>债权人 ID</TableCell>
-                  <TableCell>债务人 ID</TableCell>
+                  <TableCell>债权人地址</TableCell>
+                  <TableCell>债务人地址</TableCell>
                   <TableCell>金额</TableCell>
                   <TableCell>币种</TableCell>
                   <TableCell>到期日</TableCell>
+                  <TableCell>票据地址</TableCell>
+                  <TableCell>合同地址</TableCell>
                   <TableCell>状态</TableCell>
                   <TableCell>操作</TableCell>
                 </TableRow>
@@ -216,16 +234,25 @@ const InvoiceManagement: React.FC = () => {
                 {filteredInvoices.map((invoice: Invoice) => (
                   <TableRow key={invoice.id}>
                     <TableCell>{invoice.invoice_number}</TableCell>
-                    {/* Use creditor_id and debtor_id directly */}
-                    <TableCell title={invoice.creditor_id || ''}>
-                      {shortenAddress(invoice.creditor_id)}
+                    {/* 显示payee字段作为债权人地址 */}
+                    <TableCell title={invoice.payee || ''}>
+                      {shortenAddress(invoice.payee)}
                     </TableCell>
-                    <TableCell title={invoice.debtor_id || ''}>
-                      {shortenAddress(invoice.debtor_id)}
+                    {/* 显示payer字段作为债务人地址 */}
+                    <TableCell title={invoice.payer || ''}>
+                      {shortenAddress(invoice.payer)}
                     </TableCell>
                     <TableCell>{invoice.amount}</TableCell>
-                    <TableCell>{invoice.currency || 'N/A'}</TableCell>
+                    <TableCell>{invoice.currency || 'CNY'}</TableCell>
                     <TableCell>{formatDate(invoice.due_date)}</TableCell>
+                    {/* 显示票据IPFS地址 */}
+                    <TableCell>
+                      {getIpfsLink(invoice.invoice_ipfs_hash)}
+                    </TableCell>
+                    {/* 显示合同IPFS地址 */}
+                    <TableCell>
+                      {getIpfsLink(invoice.contract_ipfs_hash)}
+                    </TableCell>
                     <TableCell>{getStatusChip(invoice.status)}</TableCell>
                     <TableCell>
                       <IconButton 

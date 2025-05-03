@@ -34,9 +34,9 @@ class AuthService {
   }
 
   // Request a challenge from the server
-  public async requestChallenge(walletAddress: string): Promise<ChallengeResponse> {
+  public async requestChallenge(address: string): Promise<ChallengeResponse> {
     try {
-      console.log(`Requesting challenge for address: ${walletAddress}`);
+      console.log(`Requesting challenge for address: ${address}`);
       
       // Request a challenge from the server
       const challengeUrl = `${API_BASE_URL}/user/challenge`;
@@ -46,7 +46,7 @@ class AuthService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          walletAddress,
+          address,
         }),
       });
 

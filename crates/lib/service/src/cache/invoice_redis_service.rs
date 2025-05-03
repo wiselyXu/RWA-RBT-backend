@@ -2,10 +2,8 @@ use anyhow::{Result, anyhow};
 use redis::{AsyncCommands, Client, Commands, Connection, FromRedisValue, RedisError, ToRedisArgs};
 
 use common::domain::dto::invoice_redis_dto::InvoiceRedisDto;
-use common::domain::entity::InvoiceStatus;
+
 use serde_json;
-use std::sync::Arc;
-use log::{info, error};
 use crate::error::ServiceError;
 
 pub struct InvoiceRedisService {

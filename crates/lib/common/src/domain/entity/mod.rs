@@ -14,7 +14,7 @@ pub mod token;
 // Re-export entity types for easier access
 pub use enterprise::{Enterprise, EnterpriseStatus};
 pub use user::{User, UserRole};
-pub use invoice::{Invoice, InvoiceStatus};
+pub use invoice::{Invoice};
 pub use invoice_batch::{InvoiceBatch, InvoiceBatchStatus};
 pub use rbt_holding::RbtHolding;
 pub use repayment::Repayment;

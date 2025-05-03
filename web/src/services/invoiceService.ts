@@ -10,15 +10,22 @@ export interface Invoice {
   debtor_id: string;   // 后端原始字段
   amount: number;
   currency: string;
-  due_date: string; // ISO 8601 string
+  due_date: number; // 改为数值型时间戳
   status: string; // e.g., "Pending", "Verified", "Repaid"
-  ipfs_hash?: string;
+  
+  // 更新IPFS字段名称
+  invoice_ipfs_hash?: string; // 票据IPFS地址
+  contract_ipfs_hash?: string; // 合同IPFS地址
+  
+  // 兼容旧字段
+  ipfs_hash?: string; // 兼容旧版
+  contract_hash?: string; // 兼容旧版
+  
   batch_id?: string; // 对应后端的 batch_id 或 token_batch
   created_at: string; // ISO 8601 string
   updated_at: string; // ISO 8601 string
-  payee?: string; // 可能来自 creditor_id 或单独提供
-  payer?: string; // 可能来自 debtor_id 或单独提供
-  contract_hash?: string;
+  payee?: string; // 债权人地址
+  payer?: string; // 债务人地址
   blockchain_timestamp?: string;
   token_batch?: string; // 确认此字段是否与 batch_id 重复或用途不同
   is_cleared?: boolean;
@@ -30,14 +37,13 @@ export interface Invoice {
  * 创建票据参数 (与后端 DTO 对齐)
  */
 export interface CreateInvoiceParams {
-  invoiceNumber?: string;
   payee: string;
   payer: string;
-  amount: string; // Backend expects U256 string representation
+  amount: number; // Backend expects U256 string representation
   currency: string; // Added currency
-  dueDate: string; // Backend expects Unix timestamp string
-  ipfsHash: string;
-  contractHash: string;
+  due_date: number; // Backend expects Unix timestamp string
+  invoice_ipfs_hash: string;
+  contract_ipfs_hash: string;
 }
 
 class InvoiceService {
@@ -75,23 +81,22 @@ class InvoiceService {
    */
   public async createInvoice(invoiceData: CreateInvoiceParams): Promise<Invoice> {
     try {
-      // Payload matches the CreateInvoiceParams interface
-      // Keys are already camelCase due to the interface definition
-      const payload: Partial<CreateInvoiceParams> = {
+      console.log('InvoiceService接收到的参数:', invoiceData);
+      
+      // 直接使用数值类型，不转换为字符串
+      const payload = {
         payee: invoiceData.payee,
         payer: invoiceData.payer,
-        amount: invoiceData.amount,
+        amount: invoiceData.amount, // 保持为数值类型
         currency: invoiceData.currency,
-        dueDate: invoiceData.dueDate,
-        ipfsHash: invoiceData.ipfsHash,
-        contractHash: invoiceData.contractHash,
+        due_date: invoiceData.due_date, // 保持为数值类型
+        invoice_ipfs_hash: invoiceData.invoice_ipfs_hash,
+        contract_ipfs_hash: invoiceData.contract_ipfs_hash,
       };
-      // Conditionally add invoiceNumber if it exists (though we won't send it from the dialog)
-      if (invoiceData.invoiceNumber) {
-        payload.invoiceNumber = invoiceData.invoiceNumber;
-      }
       
-      // The actual request will send camelCase keys because of the payload object's structure
+      console.log('发送到后端的最终payload:', payload);
+      
+      // 发送请求到后端
       const response = await this.apiService.post<Invoice>('/invoice/create', payload);
       return response; 
     } catch (error) {

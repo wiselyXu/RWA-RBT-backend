@@ -1,13 +1,15 @@
 use crate::utils::res::{Res, res_bad_request, res_json_err, res_json_ok, res_not_found};
-use common::domain::dto::invoice_dto::InvoiceDataDto;
+use chrono::NaiveDate;
+use common::domain::dto::interest_detail_dto::InterestDetailDto;
+use common::domain::dto::invoice_dto::{CreateInvoiceDto, InvoiceDataDto};
 use common::domain::dto::query_invoice_dto::QueryParamsDto;
+use common::domain::entity::Invoice;
 use common::domain::entity::enterprise::EnterpriseDto;
 use common::domain::entity::invoice::InvoiceDto;
-use common::domain::entity::{Invoice, InvoiceStatus};
-use common::domain::dto::interest_detail_dto::InterestDetailDto;
 use ethers::middleware::SignerMiddleware;
 use ethers::providers::{Http, Provider};
 use ethers::signers::LocalWallet;
+use log::error;
 use mongodb::{
     Database,
     bson::{DateTime, Decimal128, oid::ObjectId},
@@ -19,14 +21,12 @@ use salvo::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use service::invoice::InvoiceService;
 use service::repository::InvoiceRepository;
 use service::repository::invoice_repository::UpdateInvoiceData;
-use service::invoice::InvoiceService;
 use std::convert::From;
 use std::str::FromStr;
 use std::sync::Arc;
-use log::error;
-use chrono::NaiveDate;
 
 // --- Handlers ---
 /// 创建一个票据 (Standard endpoint for creating invoice directly in DB)
@@ -54,15 +54,13 @@ pub async fn create_invoice(req: &mut Request, depot: &mut Depot) -> Res<Invoice
     };
 
     // 2. Manually parse the body and handle potential deserialization errors
-    let data = match req.parse_body::<InvoiceDataDto>().await {
+    let data = match req.parse_body::<CreateInvoiceDto>().await {
         Ok(dto) => dto,
         Err(e) => {
             log::error!("Failed to deserialize InvoiceDataDto: {}", e);
             return Err(res_bad_request(&format!("Invalid request body: {}", e)));
         }
     };
-
-    log::debug!("Attempting to create invoice in DB for user: {}", user_address);
 
     match repo.create_from_blockchain(&data).await {
         Ok(invoice) => {
@@ -248,19 +246,16 @@ pub async fn get_holding_interest_details(holding_id: QueryParam<String>, depot:
             return Err(res_json_err("User not authenticated"));
         }
     };
-    
+
     // Get the Invoice Service
-    let invoice_service = depot.obtain::<Arc<InvoiceService>>()
-        .expect("InvoiceService not found in depot");
-    
+    let invoice_service = depot.obtain::<Arc<InvoiceService>>().expect("InvoiceService not found in depot");
+
     let holding_id_str = holding_id.into_inner();
-    
+
     log::info!("Fetching interest details for holding {} owned by user {}", holding_id_str, user_address);
-    
+
     match invoice_service.get_holding_interest_details(user_address, &holding_id_str).await {
-        Ok(details) => {
-            Ok(res_json_ok(Some(details)))
-        }
+        Ok(details) => Ok(res_json_ok(Some(details))),
         Err(e) => {
             log::error!("Failed to get interest details for holding {}: {}", holding_id_str, e);
             Err(res_json_err(&format!("Failed to retrieve interest details: {}", e)))
@@ -284,10 +279,9 @@ pub async fn get_holding_interest_details(holding_id: QueryParam<String>, depot:
 )]
 pub async fn trigger_daily_interest_calculation(date: QueryParam<String>, depot: &mut Depot) -> Res<u32> {
     // TODO: Add admin authentication check
-    
-    let invoice_service = depot.obtain::<Arc<InvoiceService>>()
-        .expect("InvoiceService not found in depot");
-    
+
+    let invoice_service = depot.obtain::<Arc<InvoiceService>>().expect("InvoiceService not found in depot");
+
     // Parse the date
     let date_str = date.into_inner();
     let calculation_date = match NaiveDate::parse_from_str(&date_str, "%Y-%m-%d") {
@@ -297,9 +291,9 @@ pub async fn trigger_daily_interest_calculation(date: QueryParam<String>, depot:
             return Err(res_bad_request("Invalid date format. Please use YYYY-MM-DD."));
         }
     };
-    
+
     log::info!("Triggering daily interest calculation for date: {}", calculation_date);
-    
+
     match invoice_service.calculate_daily_interest_for_date(calculation_date).await {
         Ok(count) => {
             log::info!("Successfully calculated interest for {} holdings", count);
@@ -328,10 +322,9 @@ pub async fn trigger_daily_interest_calculation(date: QueryParam<String>, depot:
 )]
 pub async fn trigger_maturity_payments(date: QueryParam<String>, depot: &mut Depot) -> Res<u32> {
     // TODO: Add admin authentication check
-    
-    let invoice_service = depot.obtain::<Arc<InvoiceService>>()
-        .expect("InvoiceService not found in depot");
-    
+
+    let invoice_service = depot.obtain::<Arc<InvoiceService>>().expect("InvoiceService not found in depot");
+
     // Parse the date
     let date_str = date.into_inner();
     let payment_date = match NaiveDate::parse_from_str(&date_str, "%Y-%m-%d") {
@@ -341,9 +334,9 @@ pub async fn trigger_maturity_payments(date: QueryParam<String>, depot: &mut Dep
             return Err(res_bad_request("Invalid date format. Please use YYYY-MM-DD."));
         }
     };
-    
+
     log::info!("Triggering maturity payments for date: {}", payment_date);
-    
+
     match invoice_service.process_maturity_payments_for_date(payment_date).await {
         Ok(count) => {
             log::info!("Successfully processed maturity payments for {} holdings", count);
@@ -400,7 +393,7 @@ async fn query_and_save_from_blockchain(invoice_number: &str, depot: &mut Depot,
                 // Save each found invoice to DB
                 for invoice_data_dto in blockchain_invoices_data {
                     // 首先，尝试根据 invoice_number 查找票据
-                    match repo.find_by_invoice_number(&invoice_data_dto.invoice_number).await {
+                    match repo.find_by_invoice_number(&invoice_data_dto.invoice_number.clone()).await {
                         // 查找成功，并且找到了票据
                         Ok(Some(existing_invoice)) => {
                             log::info!(
@@ -415,7 +408,17 @@ async fn query_and_save_from_blockchain(invoice_number: &str, depot: &mut Depot,
                         Ok(None) => {
                             // 票据不存在，可以安全地尝试创建
                             log::debug!("Invoice {:?} not found in DB, attempting to create from blockchain data.", invoice_data_dto);
-                            match repo.create_from_blockchain(&invoice_data_dto).await {
+
+                            let create_dto = CreateInvoiceDto {
+                                payee: invoice_data_dto.payee.clone(),
+                                payer: invoice_data_dto.payer.clone(),
+                                amount: invoice_data_dto.amount.clone(),
+                                invoice_ipfs_hash: invoice_data_dto.invoice_ipfs_hash.clone(),
+                                contract_ipfs_hash: invoice_data_dto.contract_ipfs_hash.clone(),
+                                due_date: invoice_data_dto.due_date.clone(),
+                                currency: invoice_data_dto.currency.clone(),
+                            };
+                            match repo.create_from_blockchain(&create_dto).await {
                                 Ok(saved_invoice) => {
                                     log::info!("Successfully saved new invoice {} from blockchain to DB.", saved_invoice.invoice_number);
                                     saved_invoice_dtos.push(InvoiceDto::from(&saved_invoice));
@@ -449,4 +452,3 @@ async fn query_and_save_from_blockchain(invoice_number: &str, depot: &mut Depot,
         }
     }
 }
-
