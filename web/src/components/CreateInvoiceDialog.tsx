@@ -20,19 +20,23 @@ import { CloudUpload } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import InvoiceService, { CreateInvoiceParams } from '../services/invoiceService';
 
+// Assuming ethers is installed or will be added
+// import { ethers } from 'ethers';
+
 interface CreateInvoiceDialogProps {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
 
+// FormData without invoiceNumber
 interface FormData {
-  invoice_number: string;
-  payer: string;
+  payer: string; 
   amount: string;
-  due_date: Date | null;
-  ipfs_hash: string;
-  contract_hash: string;
+  currency: string; // Added currency
+  dueDate: Date | null; // Keep Date object for picker
+  ipfsHash: string; 
+  contractHash: string; 
 }
 
 const CreateInvoiceDialog: React.FC<CreateInvoiceDialogProps> = ({
@@ -46,17 +50,17 @@ const CreateInvoiceDialog: React.FC<CreateInvoiceDialogProps> = ({
   const [success, setSuccess] = useState(false);
   const [fileUploading, setFileUploading] = useState(false);
   
-  // 表单数据
+  // Form state without invoiceNumber
   const [formData, setFormData] = useState<FormData>({
-    invoice_number: '',
     payer: '',
     amount: '',
-    due_date: null,
-    ipfs_hash: '',
-    contract_hash: '',
+    currency: 'CNY', // Default currency
+    dueDate: null,
+    ipfsHash: '',
+    contractHash: '',
   });
 
-  // 更新表单数据
+  // Update form data
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev: FormData) => ({
@@ -65,36 +69,28 @@ const CreateInvoiceDialog: React.FC<CreateInvoiceDialogProps> = ({
     }));
   };
 
-  // 日期选择处理
+  // Handle date change
   const handleDateChange = (date: Date | null) => {
     setFormData((prev: FormData) => ({
       ...prev,
-      due_date: date,
+      dueDate: date,
     }));
   };
 
-  // 文件上传处理 (实际项目中可能需要实现文件上传到IPFS或其他存储)
+  // Handle file upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'invoice' | 'contract') => {
     if (!e.target.files || e.target.files.length === 0) return;
     
     try {
       setFileUploading(true);
-      // 模拟上传文件过程
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 1500)); 
+      const mockHash = `mock_${type}_hash_${Math.random().toString(36).substring(2, 10)}`;
       
-      // 这里应该实现实际的文件上传逻辑，然后获取哈希值
-      const mockHash = `ipfs_hash_${Math.random().toString(36).substring(2, 10)}`;
-      
+      // Use camelCase for state update
       if (type === 'invoice') {
-        setFormData((prev: FormData) => ({
-          ...prev,
-          ipfs_hash: mockHash,
-        }));
+        setFormData((prev: FormData) => ({ ...prev, ipfsHash: mockHash }));
       } else {
-        setFormData((prev: FormData) => ({
-          ...prev,
-          contract_hash: mockHash,
-        }));
+        setFormData((prev: FormData) => ({ ...prev, contractHash: mockHash }));
       }
     } catch (err) {
       console.error(`Failed to upload ${type} file:`, err);
@@ -104,11 +100,18 @@ const CreateInvoiceDialog: React.FC<CreateInvoiceDialogProps> = ({
     }
   };
 
-  // 提交表单
+  // Handle form submission
   const handleSubmit = async () => {
-    // 表单验证
-    if (!formData.invoice_number || !formData.payer || !formData.amount || !formData.due_date || !formData.ipfs_hash || !formData.contract_hash) {
+    // Validation without invoiceNumber
+    if (/*!formData.invoiceNumber || */ !formData.payer || !formData.amount || !formData.currency || !formData.dueDate || !formData.ipfsHash || !formData.contractHash) {
       setError('请填写所有必填字段');
+      return;
+    }
+    
+    // Validate amount
+    const amountValue = parseFloat(formData.amount);
+    if (isNaN(amountValue) || amountValue <= 0) {
+      setError('请输入有效的金额');
       return;
     }
 
@@ -117,38 +120,43 @@ const CreateInvoiceDialog: React.FC<CreateInvoiceDialogProps> = ({
 
     try {
       const invoiceService = InvoiceService.getInstance();
+
+      // --- Amount Conversion (Placeholder) ---
+      // TODO: Convert amount to U256 string format using ethers.js or similar
+      // Example (requires ethers): 
+      // const amountU256String = ethers.utils.parseUnits(formData.amount, 18).toString(); 
+      const amountToSend = formData.amount; // Using raw string for now
+
+      // --- Due Date Conversion to ISO String ---
+      const dueDateISOString = formData.dueDate!.toISOString(); // Use ISO format
       
-      // 准备创建票据的参数
+      // Prepare payload matching CreateInvoiceParams (camelCase)
       const invoiceData: CreateInvoiceParams = {
-        invoice_number: formData.invoice_number,
-        payee: userInfo?.walletAddress || '',
-        payer: formData.payer,
-        amount: formData.amount,
-        ipfs_hash: formData.ipfs_hash,
-        contract_hash: formData.contract_hash,
-        timestamp: Math.floor(Date.now() / 1000).toString(),
-        due_date: Math.floor(formData.due_date!.getTime() / 1000).toString(),
-        token_batch: '', // 初始创建时不需要填写
-        is_cleared: false,
-        is_valid: true,
+        payee: userInfo?.walletAddress || '', 
+        payer: formData.payer, 
+        amount: amountToSend, 
+        currency: formData.currency, 
+        dueDate: dueDateISOString, // Send ISO string
+        ipfsHash: formData.ipfsHash,
+        contractHash: formData.contractHash,
       };
 
       await invoiceService.createInvoice(invoiceData);
       setSuccess(true);
       
-      // 重置表单
+      // Reset form state without invoiceNumber
       setFormData({
-        invoice_number: '',
         payer: '',
         amount: '',
-        due_date: null,
-        ipfs_hash: '',
-        contract_hash: '',
+        currency: 'CNY',
+        dueDate: null,
+        ipfsHash: '',
+        contractHash: '',
       });
 
-      // 3秒后关闭对话框
       setTimeout(() => {
         onSuccess();
+        setSuccess(false);
       }, 2000);
     } catch (err) {
       console.error('Failed to create invoice:', err);
@@ -157,11 +165,18 @@ const CreateInvoiceDialog: React.FC<CreateInvoiceDialogProps> = ({
       setLoading(false);
     }
   };
+  
+  const handleDialogClose = () => {
+    if (!loading) {
+      setSuccess(false);
+      onClose();
+    }
+  };
 
   return (
     <Dialog 
       open={open} 
-      onClose={loading ? undefined : onClose} 
+      onClose={handleDialogClose} 
       maxWidth="md" 
       fullWidth
     >
@@ -179,31 +194,34 @@ const CreateInvoiceDialog: React.FC<CreateInvoiceDialogProps> = ({
               </Alert>
             )}
             <Grid container spacing={2}>
-              <Grid item xs={12} sm={6}>
+              {/* Invoice Number Field Removed */}
+              {/* <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
                   label="票据编号"
-                  name="invoice_number"
-                  value={formData.invoice_number}
+                  name="invoiceNumber" 
+                  value={formData.invoiceNumber}
                   onChange={handleInputChange}
                   disabled={loading}
                   required
                 />
-              </Grid>
+              </Grid> */}
+              {/* Creditor (Payee) */}
               <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
-                  label="债权人账户"
+                  label="债权人 (收款方)"
                   value={userInfo?.walletAddress || ''}
                   disabled
-                  helperText="使用当前连接的钱包地址"
+                  helperText="当前连接的钱包地址"
                 />
               </Grid>
+              {/* Debtor (Payer) */}
               <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
-                  label="债务方地址"
-                  name="payer"
+                  label="债务人 (付款方) 地址"
+                  name="payer" 
                   value={formData.payer}
                   onChange={handleInputChange}
                   disabled={loading}
@@ -211,47 +229,71 @@ const CreateInvoiceDialog: React.FC<CreateInvoiceDialogProps> = ({
                   placeholder="0x..."
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
+              {/* Amount */            
+              <Grid item xs={12} sm={4}> 
                 <TextField
                   fullWidth
                   label="金额"
-                  name="amount"
+                  name="amount" 
                   type="number"
                   value={formData.amount}
                   onChange={handleInputChange}
                   disabled={loading}
                   required
-                  InputProps={{
-                    endAdornment: <InputAdornment position="end">元</InputAdornment>,
-                  }}
+                  InputProps={{ inputProps: { min: 0 } }}
                 />
               </Grid>
+              {/* Removed comment from here */}
+              <Grid item xs={12} sm={2}> 
+                 {/* Currency Field Re-added */}
+                 <TextField
+                    fullWidth
+                    label="币种"
+                    name="currency"
+                    value={formData.currency}
+                    onChange={handleInputChange}
+                    disabled={loading}
+                    required
+                    select
+                    SelectProps={{ native: true }}
+                  >
+                    <option value="CNY">CNY</option>
+                    <option value="USD">USD</option>
+                    {/* Add other currencies as needed */}
+                  </TextField>
+              </Grid>
+              {/* Due Date */}
               <Grid item xs={12} sm={6}>
                 <LocalizationProvider dateAdapter={AdapterDateFns}>
-                  <DatePicker 
-                    label="到期日期"
-                    value={formData.due_date}
-                    onChange={handleDateChange}
-                    disabled={loading}
-                    slotProps={{
-                      textField: {
-                        fullWidth: true,
-                        required: true
-                      }
-                    }}
-                  />
+                  <>
+                    <DatePicker 
+                      label="到期日期"
+                      value={formData.dueDate} // Use camelCase state variable
+                      onChange={handleDateChange}
+                      disabled={loading}
+                      slotProps={{
+                        textField: {
+                          fullWidth: true,
+                          required: true,
+                          name: 'dueDate' // Bind to camelCase state
+                        }
+                      }}
+                    />
+                  </>
                 </LocalizationProvider>
               </Grid>
-              
+              {/* Annual Interest Rate field removed */}
+              {/* Enterprise Name - Display only */}
               <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
-                  label="企业名称"
+                  label="所属企业"
                   value={userInfo?.enterpriseName || '未绑定企业'}
                   disabled
                 />
               </Grid>
               
+              {/* IPFS Hash Upload */}
               <Grid item xs={12}>
                 <Button
                   variant="outlined"
@@ -260,7 +302,7 @@ const CreateInvoiceDialog: React.FC<CreateInvoiceDialogProps> = ({
                   fullWidth
                   disabled={loading || fileUploading}
                 >
-                  {fileUploading ? '上传中...' : '上传票据图片'}
+                  {fileUploading ? '上传中...' : '上传票据文件 (IPFS)'}
                   <input
                     type="file"
                     hidden
@@ -268,13 +310,14 @@ const CreateInvoiceDialog: React.FC<CreateInvoiceDialogProps> = ({
                     onChange={(e) => handleFileUpload(e, 'invoice')}
                   />
                 </Button>
-                {formData.ipfs_hash && (
+                {formData.ipfsHash && (
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    已上传票据文件: {formData.ipfs_hash}
+                    票据 IPFS Hash: {formData.ipfsHash}
                   </Typography>
                 )}
               </Grid>
               
+              {/* Contract Hash Upload */}
               <Grid item xs={12}>
                 <Button
                   variant="outlined"
@@ -283,17 +326,17 @@ const CreateInvoiceDialog: React.FC<CreateInvoiceDialogProps> = ({
                   fullWidth
                   disabled={loading || fileUploading}
                 >
-                  {fileUploading ? '上传中...' : '上传合同文件'}
+                  {fileUploading ? '上传中...' : '上传合同文件 (IPFS)'}
                   <input
                     type="file"
                     hidden
-                    accept="image/*,.pdf"
+                    accept="image/*,.pdf,.doc,.docx"
                     onChange={(e) => handleFileUpload(e, 'contract')}
                   />
                 </Button>
-                {formData.contract_hash && (
+                {formData.contractHash && (
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    已上传合同文件: {formData.contract_hash}
+                    合同 IPFS Hash: {formData.contractHash}
                   </Typography>
                 )}
               </Grid>
@@ -304,14 +347,15 @@ const CreateInvoiceDialog: React.FC<CreateInvoiceDialogProps> = ({
       
       {!success && (
         <DialogActions>
-          <Button onClick={onClose} disabled={loading}>
+          <Button onClick={handleDialogClose} disabled={loading}>
             取消
           </Button>
           <Button 
             onClick={handleSubmit} 
             variant="contained" 
             color="primary"
-            disabled={loading || fileUploading}
+            // Update disabled check without invoiceNumber
+            disabled={loading || fileUploading || /* !formData.invoiceNumber || */ !formData.payer || !formData.amount || !formData.currency || !formData.dueDate || !formData.ipfsHash || !formData.contractHash}
           >
             {loading ? <CircularProgress size={24} /> : '创建票据'}
           </Button>

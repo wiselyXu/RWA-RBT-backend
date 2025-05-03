@@ -9,8 +9,11 @@ use serde::Serialize;
 use crate::error::ServiceError;
 
 use common::domain::entity::{Invoice, InvoiceStatus};
-use std::str::FromStr;
+
+
 use common::domain::dto::invoice_dto::InvoiceDataDto;
+use common::utils;
+use chrono;
 
 pub struct InvoiceRepository {
     collection: Collection<Invoice>,
@@ -97,57 +100,70 @@ impl InvoiceRepository {
         Ok(invoices)
     }
 
-    // Create new invoice from blockchain data
+    // Create new invoice from data provided by frontend/API (not directly from blockchain event)
     pub async fn create_from_blockchain(
         &self,
-        data: &InvoiceDataDto
-    ) -> Result<Invoice, mongodb::error::Error> {
-        // Parse the amount from String to u64
-        let amount:u64 = data.amount.parse().unwrap();
+        data: &InvoiceDataDto,
+    ) -> Result<Invoice, ServiceError> { // Changed return type to ServiceError
+        // TODO: Implement robust parsing with proper error handling instead of unwrap()
+        // Parse the amount from String to u64 (or Decimal128 if needed)
+        let amount: u64 = data.amount.parse().map_err(|e|
+            ServiceError::DecimalConversionError(format!("Invalid amount format: {}", e))
+        )?;
         
-        // Attempt to parse due_date from string (assuming it's a Unix timestamp string)
-        let due_date_timestamp = i64::from_str(&data.due_date).unwrap_or_else(|_| chrono::Utc::now().timestamp());
-        let due_date = DateTime::from_millis(due_date_timestamp * 1000); // Convert seconds to milliseconds
+        // Parse due_date from ISO 8601 string (RFC3339)
+        let due_date_chrono = chrono::DateTime::parse_from_rfc3339(&data.due_date).map_err(|e|
+            ServiceError::InternalError(format!("Invalid due_date format (expected ISO 8601 string like RFC3339): {}, Received: '{}'", e, data.due_date))
+        )?;
+        // Convert chrono DateTime to MongoDB BSON DateTime via milliseconds
+        let milliseconds_since_epoch = due_date_chrono.with_timezone(&chrono::Utc).timestamp_millis();
+        let due_date = mongodb::bson::DateTime::from_millis(milliseconds_since_epoch);
 
-        // Attempt to parse blockchain_timestamp from string (assuming it's a Unix timestamp string)
-        let blockchain_timestamp_val = i64::from_str(&data.timestamp).unwrap_or_else(|_| chrono::Utc::now().timestamp());
-        let blockchain_datetime = DateTime::from_millis(blockchain_timestamp_val * 1000);
-        
-        // Create default ObjectIds for creditor/debtor for now
-        // TODO: Implement lookup or creation logic based on payee/payer addresses
-        let creditor_id = ObjectId::new(); 
-        let debtor_id = ObjectId::new();
-        
+        // TODO: Lookup Enterprise ObjectId for creditor based on creator_address (data.payee)
+        // let enterprise_repo = EnterpriseRepository::new(self.collection.database());
+        // let creditor_enterprise = enterprise_repo.find_by_wallet_address(creator_address).await?
+        //     .ok_or_else(|| ServiceError::NotFound(format!("Creditor enterprise not found for address: {}", creator_address)))?;
+        // let creditor_id = creditor_enterprise.id.unwrap();
+        let creditor_id = ObjectId::new(); // Placeholder
+
+        // TODO: Lookup Enterprise ObjectId for debtor based on data.payer
+        // let debtor_enterprise = enterprise_repo.find_by_wallet_address(&data.payer).await?
+        //     .ok_or_else(|| ServiceError::NotFound(format!("Debtor enterprise not found for address: {}", data.payer)))?;
+        // let debtor_id = debtor_enterprise.id.unwrap();
+        let debtor_id = ObjectId::new(); // Placeholder
+
+        // Generate invoice_number (assuming this is still desired backend generation)
+        let invoice_number = format!("INV-{}", utils::SnowflakeUtil::get_id().unwrap().to_string());
+
         // Create a new invoice instance
         let mut invoice = Invoice::new(
-            data.invoice_number.clone(),
-            creditor_id,
-            debtor_id,
+            invoice_number,
+            creditor_id, // Use looked-up ID
+            debtor_id,   // Use looked-up ID
             amount,
-            "USD".to_string(), // Default currency, consider making dynamic
+            data.currency.clone(), // Use currency from DTO
             due_date,
         );
         
         // Map fields from DTO to the Invoice entity
+        // payee/payer are the blockchain addresses from the DTO
         invoice.payee = Some(data.payee.clone());
         invoice.payer = Some(data.payer.clone());
         invoice.ipfs_hash = Some(data.ipfs_hash.clone());
         invoice.contract_hash = Some(data.contract_hash.clone());
-        invoice.blockchain_timestamp = Some(blockchain_datetime.to_string()); // Store parsed timestamp as string or DateTime?
-        invoice.token_batch = Some(data.token_batch.clone());
-        invoice.is_cleared = Some(data.is_cleared);
-        invoice.is_valid = Some(data.is_valid);
         
-        // Optionally update status based on blockchain data
-        if data.is_valid {
-            invoice.status = InvoiceStatus::Verified;
-        }
-        if data.is_cleared {
-            invoice.status = InvoiceStatus::Repaid;
-        }
+        // Fields removed from DTO are no longer mapped here:
+        // invoice.blockchain_timestamp = ...
+        // invoice.token_batch = ...
+        // invoice.is_cleared = ...
+        // invoice.is_valid = ...
+        
+        // Default status for new invoices created via API
+        invoice.status = InvoiceStatus::Pending;
 
         // Insert the invoice and get its ID
-        let result = self.collection.insert_one(&invoice).await?;
+        let result = self.collection.insert_one(&invoice).await
+            .map_err(|e| ServiceError::MongoDbError(format!("Failed to insert invoice: {}", e)))?;
         
         let mut created_invoice = invoice;
         created_invoice.id = result.inserted_id.as_object_id();

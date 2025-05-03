@@ -48,7 +48,6 @@ const enterpriseMenuItems: MenuItem[] = [
     label: '我的债权',
     path: '/my-credits',
     subItems: [
-      { label: '我的票据', path: '/my-credits/my-bills' },
       { label: '票据管理', path: '/my-credits/invoices' },
       { label: '我发行的 token', path: '/my-credits/my-issued-tokens' }, 
     ],
