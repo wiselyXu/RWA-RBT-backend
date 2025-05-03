@@ -15,7 +15,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - /root/server/config:/app/config
+      - /home/home/server/config:/app/config
     environment:
       - PHAROS_RPC_URL=https://rpc.sepolia.mantle.xyz
       - INVOICE_CONTRACT_ADDRESS=0x3fdBBc8074978c7fd8941efB71d1a8d71327E1C1
