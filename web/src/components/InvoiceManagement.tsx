@@ -17,12 +17,16 @@ import {
   Grid,
   CircularProgress,
   Alert,
+  Checkbox,
+  Tooltip,
 } from '@mui/material';
 import {
   Add as AddIcon,
   Search as SearchIcon,
   Visibility as VisibilityIcon,
   Delete as DeleteIcon,
+  UploadFile as UploadIcon,
+  Send as SendIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import InvoiceService, { Invoice } from '../services/invoiceService';
@@ -38,6 +42,11 @@ const InvoiceManagement: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  
+  // 新增状态用于管理选中的票据
+  const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
+  const [processingIds, setProcessingIds] = useState<string[]>([]); // 正在处理的票据IDs
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // 获取票据列表
   useEffect(() => {
@@ -73,6 +82,114 @@ const InvoiceManagement: React.FC = () => {
     setSearchTerm(e.target.value);
   };
 
+  // 处理票据复选框选择
+  const handleSelectInvoice = (invoiceId: string) => {
+    setSelectedInvoices(prev => {
+      if (prev.includes(invoiceId)) {
+        return prev.filter(id => id !== invoiceId);
+      } else {
+        return [...prev, invoiceId];
+      }
+    });
+  };
+
+  // 检查是否可以发行选中的票据
+  const canIssueSelected = (): boolean => {
+    if (selectedInvoices.length === 0) return false;
+    
+    // 只有已上链(Verified)状态的票据可以发行
+    const selectedInvoiceObjects = invoices.filter(invoice => 
+      selectedInvoices.includes(invoice.id) && 
+      invoice.status.toLowerCase() === 'verified'
+    );
+    
+    if (selectedInvoiceObjects.length === 0) return false;
+    
+    // 检查所有选中的票据是否有相同的债权人、债务人和币种
+    if (selectedInvoiceObjects.length > 1) {
+      const firstInvoice = selectedInvoiceObjects[0];
+      const isConsistent = selectedInvoiceObjects.every(invoice => 
+        invoice.payee === firstInvoice.payee &&
+        invoice.payer === firstInvoice.payer &&
+        invoice.currency === firstInvoice.currency
+      );
+      
+      if (!isConsistent) {
+        // 可以添加一个提示信息
+        setError('选中的票据必须具有相同的债权人、债务人和币种才能一起发行');
+        return false;
+      }
+    }
+    
+    return true;
+  };
+
+  // 批量发行选中的票据
+  const handleIssueSelected = async () => {
+    if (!canIssueSelected() || !confirm('确定要发行选中的票据吗？')) {
+      return;
+    }
+
+    try {
+      setProcessingIds(selectedInvoices);
+      setError(null);
+      
+      const invoiceService = InvoiceService.getInstance();
+      await invoiceService.issueInvoices(selectedInvoices);
+      
+      setSuccessMessage(`成功发行 ${selectedInvoices.length} 张票据`);
+      
+      // 重置选择并刷新列表
+      setSelectedInvoices([]);
+      setRefreshTrigger(prev => prev + 1);
+      
+      // 3秒后清除成功消息
+      setTimeout(() => {
+        setSuccessMessage(null);
+      }, 3000);
+    } catch (err) {
+      console.error('Failed to issue invoices:', err);
+      setError('发行票据失败');
+    } finally {
+      setProcessingIds([]);
+    }
+  };
+
+  // 将票据状态更新为"已上链"
+  const handleVerifyInvoice = async (invoiceId: string) => {
+    if (!confirm('确定要将此票据状态更新为"已上链"吗？')) {
+      return;
+    }
+
+    try {
+      setProcessingIds(prev => [...prev, invoiceId]);
+      setError(null);
+      
+      const invoiceService = InvoiceService.getInstance();
+      await invoiceService.verifyInvoice(invoiceId);
+      
+      setSuccessMessage('票据状态已更新为"已上链"');
+      
+      // 更新本地状态
+      setInvoices(invoices.map(invoice => {
+        if (invoice.id === invoiceId) {
+          return { ...invoice, status: 'Verified' };
+        }
+        return invoice;
+      }));
+      
+      // 3秒后清除成功消息
+      setTimeout(() => {
+        setSuccessMessage(null);
+      }, 3000);
+    } catch (err) {
+      console.error('Failed to verify invoice:', err);
+      setError('更新票据状态失败');
+    } finally {
+      setProcessingIds(prev => prev.filter(id => id !== invoiceId));
+    }
+  };
+
   // 打开创建票据对话框
   const handleOpenCreateDialog = () => {
     setCreateDialogOpen(true);
@@ -97,17 +214,22 @@ const InvoiceManagement: React.FC = () => {
     }
 
     try {
-      setLoading(true);
+      setProcessingIds(prev => [...prev, id]);
       const invoiceService = InvoiceService.getInstance();
       await invoiceService.deleteInvoice(id);
       
       // 从列表中移除该票据
       setInvoices(invoices.filter((invoice: Invoice) => invoice.id !== id));
+      
+      // 如果该票据在选中状态，也从选中列表中移除
+      if (selectedInvoices.includes(id)) {
+        setSelectedInvoices(prev => prev.filter(invoiceId => invoiceId !== id));
+      }
     } catch (err) {
       console.error('Failed to delete invoice:', err);
-      alert('删除票据失败');
+      setError('删除票据失败');
     } finally {
-      setLoading(false);
+      setProcessingIds(prev => prev.filter(pid => pid !== id));
     }
   };
 
@@ -188,14 +310,28 @@ const InvoiceManagement: React.FC = () => {
               }}
               sx={{ width: 300 }}
             />
-            <Button
-              variant="contained"
-              color="primary"
-              startIcon={<AddIcon />}
-              onClick={handleOpenCreateDialog}
-            >
-              创建票据
-            </Button>
+            <Box>
+              {/* 发行按钮，只在有选中票据且符合条件时启用 */}
+              <Button
+                variant="contained"
+                color="secondary"
+                startIcon={<SendIcon />}
+                onClick={handleIssueSelected}
+                disabled={!canIssueSelected() || processingIds.length > 0}
+                sx={{ mr: 2 }}
+              >
+                发行到市场
+              </Button>
+              
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<AddIcon />}
+                onClick={handleOpenCreateDialog}
+              >
+                创建票据
+              </Button>
+            </Box>
           </Box>
         ) : (
           <Alert severity="info" sx={{ mb: 3 }}>
@@ -208,8 +344,14 @@ const InvoiceManagement: React.FC = () => {
             {error}
           </Alert>
         )}
+        
+        {successMessage && (
+          <Alert severity="success" sx={{ mb: 3 }}>
+            {successMessage}
+          </Alert>
+        )}
 
-        {loading ? (
+        {loading && !processingIds.length ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', my: 5 }}>
             <CircularProgress />
           </Box>
@@ -218,6 +360,9 @@ const InvoiceManagement: React.FC = () => {
             <Table>
               <TableHead>
                 <TableRow>
+                  <TableCell padding="checkbox">
+                    {/* 可以在这里添加全选功能 */}
+                  </TableCell>
                   <TableCell>票据编号</TableCell>
                   <TableCell>债权人地址</TableCell>
                   <TableCell>债务人地址</TableCell>
@@ -233,6 +378,13 @@ const InvoiceManagement: React.FC = () => {
               <TableBody>
                 {filteredInvoices.map((invoice: Invoice) => (
                   <TableRow key={invoice.id}>
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        checked={selectedInvoices.includes(invoice.id)}
+                        onChange={() => handleSelectInvoice(invoice.id)}
+                        disabled={processingIds.includes(invoice.id)}
+                      />
+                    </TableCell>
                     <TableCell>{invoice.invoice_number}</TableCell>
                     {/* 显示payee字段作为债权人地址 */}
                     <TableCell title={invoice.payee || ''}>
@@ -255,24 +407,48 @@ const InvoiceManagement: React.FC = () => {
                     </TableCell>
                     <TableCell>{getStatusChip(invoice.status)}</TableCell>
                     <TableCell>
-                      <IconButton 
-                        size="small" 
-                        title="查看详情"
-                        // TODO: Implement actual detail view logic
-                        onClick={() => alert(`查看票据详情: ${invoice.id} 功能待实现`)}
-                      >
-                        <VisibilityIcon fontSize="small" />
-                      </IconButton>
-                      {/* Allow deletion for enterprise users */}
-                      {userInfo?.isEnterpriseBound && (
+                      {/* 未上链状态才显示上链按钮 */}
+                      {invoice.status.toLowerCase() === 'pending' && (
+                        <Tooltip title="上链">
+                          <IconButton
+                            size="small"
+                            onClick={() => handleVerifyInvoice(invoice.id)}
+                            disabled={processingIds.includes(invoice.id)}
+                            color="primary"
+                          >
+                            <UploadIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      
+                      <Tooltip title="查看详情">
                         <IconButton 
                           size="small" 
-                          title="删除"
-                          onClick={() => handleDeleteInvoice(invoice.id)}
-                          disabled={loading} // Disable delete button while loading
+                          onClick={() => alert(`查看票据详情: ${invoice.id} 功能待实现`)}
+                          disabled={processingIds.includes(invoice.id)}
                         >
-                          <DeleteIcon fontSize="small" />
+                          <VisibilityIcon fontSize="small" />
                         </IconButton>
+                      </Tooltip>
+                      
+                      {/* 只允许删除未上链或者已上链状态的票据 */}
+                      {userInfo?.isEnterpriseBound && 
+                       ['pending', 'verified'].includes(invoice.status.toLowerCase()) && (
+                        <Tooltip title="删除">
+                          <IconButton 
+                            size="small" 
+                            color="error"
+                            onClick={() => handleDeleteInvoice(invoice.id)}
+                            disabled={processingIds.includes(invoice.id)}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      
+                      {/* 正在处理中显示加载图标 */}
+                      {processingIds.includes(invoice.id) && (
+                        <CircularProgress size={20} sx={{ ml: 1 }} />
                       )}
                     </TableCell>
                   </TableRow>

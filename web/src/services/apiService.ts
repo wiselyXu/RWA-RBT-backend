@@ -51,8 +51,15 @@ class ApiService {
       await this.handleErrorResponse(response);
     }
 
-    const data = await response.json();
-    return data.data as T;
+    const responseData = await response.json();
+    
+    // 检查业务状态码，只有code为200才视为成功
+    if (responseData.code !== 200) {
+      console.error("API业务错误:", responseData);
+      throw new Error(responseData.msg || `业务错误: ${responseData.code}`);
+    }
+    
+    return responseData.data as T;
   }
 
   /**
@@ -79,8 +86,15 @@ class ApiService {
       await this.handleErrorResponse(response);
     }
 
-    const data = await response.json();
-    return data.data as T;
+    const responseData = await response.json();
+    
+    // 检查业务状态码，只有code为200才视为成功
+    if (responseData.code !== 200) {
+      console.error("API业务错误:", responseData);
+      throw new Error(responseData.msg || `业务错误: ${responseData.code}`);
+    }
+    
+    return responseData.data as T;
   }
 
   /**
@@ -107,8 +121,15 @@ class ApiService {
       await this.handleErrorResponse(response);
     }
 
-    const data = await response.json();
-    return data.data as T;
+    const responseData = await response.json();
+    
+    // 检查业务状态码，只有code为200才视为成功
+    if (responseData.code !== 200) {
+      console.error("API业务错误:", responseData);
+      throw new Error(responseData.msg || `业务错误: ${responseData.code}`);
+    }
+    
+    return responseData.data as T;
   }
 
   /**
@@ -134,8 +155,15 @@ class ApiService {
       await this.handleErrorResponse(response);
     }
 
-    const data = await response.json();
-    return data.data as T;
+    const responseData = await response.json();
+    
+    // 检查业务状态码，只有code为200才视为成功
+    if (responseData.code !== 200) {
+      console.error("API业务错误:", responseData);
+      throw new Error(responseData.msg || `业务错误: ${responseData.code}`);
+    }
+    
+    return responseData.data as T;
   }
 
   /**
@@ -154,7 +182,8 @@ class ApiService {
     let errorMessage: string;
     try {
       const errorData = await response.json();
-      errorMessage = errorData.message || `Error: ${response.status} ${response.statusText}`;
+      errorMessage = errorData.msg || `Error: ${response.status} ${response.statusText}`;
+      console.error("API错误详细信息:", errorData);
     } catch {
       errorMessage = `Error: ${response.status} ${response.statusText}`;
     }

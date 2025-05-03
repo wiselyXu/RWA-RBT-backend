@@ -8,6 +8,7 @@ import RepayDebtList from './components/RepayDebtList';
 import PendingSignatureList from './components/PendingSignatureList';
 import MyTokenList from './components/MyTokenList';
 import InvoiceManagement from './components/InvoiceManagement';
+import InvoiceBatchPage from './pages/InvoiceBatchPage';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 const handleSign = (data: {
@@ -45,6 +46,7 @@ const AppRoutes: React.FC = () => {
       {/* Protected routes that require authentication */}
       <Route path="/my-credits/my-bills" element={<ProtectedRoute element={<BillManagement />} />} />
       <Route path="/my-credits/invoices" element={<ProtectedRoute element={<InvoiceManagement />} />} />
+      <Route path="/my-credits/batches" element={<ProtectedRoute element={<InvoiceBatchPage />} />} />
       <Route path="/my-credits/my-issued-tokens" element={<ProtectedRoute element={<MyIssuedTokens />} />} />
       <Route path="token-market" element={<ProtectedRoute element={<TokenMarket />} />} />
       <Route path="/my-debts/repay-debt" element={<ProtectedRoute element={<RepayDebtList />} />} />

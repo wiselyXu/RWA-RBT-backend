@@ -39,16 +39,27 @@ pub fn init_enterprise_router() -> Router {
 }
 
 pub fn init_invoice_router() -> Router {
-    Router::with_path("/invoice")
+    // 创建公共路由（无需认证）
+    let public_routes = Router::new()
         .push(Router::with_path("/list").get(invoice_controller::list_invoices))
-        .push(Router::with_path("/detail").get(invoice_controller::query_invoice_data))
-        .push(Router::with_path("/del").hoop(common_controller::auth_token).delete(invoice_controller::delete_invoice))
-        .push(Router::with_path("/create").hoop(common_controller::auth_token).post(invoice_controller::create_invoice))
-        .push(
-            Router::with_path("/holding/interest-details")
-                .hoop(common_controller::auth_token)
-                .get(invoice_controller::get_holding_interest_details),
-        )
+        .push(Router::with_path("/detail").get(invoice_controller::query_invoice_data));
+    
+    // 创建需要认证的路由
+    let auth_routes = Router::new()
+        .hoop(common_controller::auth_token) // 复用认证中间件
+        .push(Router::with_path("/del").delete(invoice_controller::delete_invoice))
+        .push(Router::with_path("/create").post(invoice_controller::create_invoice))
+        .push(Router::with_path("/holding/interest-details").get(invoice_controller::get_holding_interest_details))
+        .push(Router::with_path("/verify").post(invoice_controller::verify_invoice))
+        .push(Router::with_path("/issue").post(invoice_controller::issue_invoices))
+        .push(Router::with_path("/batches").get(invoice_controller::list_user_invoice_batches))
+        .push(Router::with_path("/batch/:id").get(invoice_controller::get_invoice_batch_by_id))
+        .push(Router::with_path("/batch/:id/invoices").get(invoice_controller::get_invoices_by_batch_id));
+    
+    // 合并路由
+    Router::with_path("/invoice")
+        .push(public_routes)
+        .push(auth_routes)
 }
 
 pub fn init_purchase_router() -> Router {
@@ -90,13 +101,14 @@ pub fn init_interest_router() -> Router {
 // 新增 Token 相关路由
 pub fn init_token_router() -> Router {
     Router::with_path("/token")
-        .push(Router::with_path("/market").get(token_controller::list_token_markets))
-        .push(Router::with_path("/list").get(token_controller::list_token_batches))
+        .push(Router::with_path("/markets").get(token_controller::list_token_markets))
+        .push(Router::with_path("/batches").get(token_controller::list_token_batches))
         .push(
             Router::new()
                 .hoop(common_controller::auth_token) // Token routes requiring authentication
-                .push(Router::with_path("/batch/create").post(token_controller::create_token_batch))
+                .push(Router::with_path("/create").post(token_controller::create_token_batch))
                 .push(Router::with_path("/purchase").post(token_controller::purchase_tokens))
-                .push(Router::with_path("/holdings").get(token_controller::get_user_token_holdings)),
+                .push(Router::with_path("/holdings").get(token_controller::get_user_token_holdings))
+                .push(Router::with_path("/from_invoice_batch").post(token_controller::create_token_batch_from_invoice_batch))
         )
 }

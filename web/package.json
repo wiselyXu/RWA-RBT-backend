@@ -9,7 +9,7 @@
     "@mui/material": "^5.14.20",
     "@mui/styles": "^5.14.20",
     "@mui/system": "^5.14.20",
-    "@mui/x-date-pickers": "^8.0.0",
+    "@mui/x-date-pickers": "^8.2.0",
     "@tanstack/react-table": "^8.21.3",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",

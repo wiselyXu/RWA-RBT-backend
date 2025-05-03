@@ -1,4 +1,4 @@
-use crate::utils::res::{Res, res_bad_request, res_json_err, res_json_ok, res_not_found};
+use crate::utils::res::{Res, res_bad_request, res_json_err, res_json_ok, res_not_found, res_json_custom};
 use chrono::NaiveDate;
 use common::domain::dto::interest_detail_dto::InterestDetailDto;
 use common::domain::dto::invoice_dto::{CreateInvoiceDto, InvoiceDataDto};
@@ -9,7 +9,7 @@ use common::domain::entity::invoice::InvoiceDto;
 use ethers::middleware::SignerMiddleware;
 use ethers::providers::{Http, Provider};
 use ethers::signers::LocalWallet;
-use log::error;
+use log::{error, warn};
 use mongodb::{
     Database,
     bson::{DateTime, Decimal128, oid::ObjectId},
@@ -27,6 +27,14 @@ use service::repository::invoice_repository::UpdateInvoiceData;
 use std::convert::From;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::fs::read;
+use salvo::http::StatusCode;
+use salvo::oapi::oapi;
+use service::{EnterpriseRepository, UserRepository};
+use crate::controller::EnterpriseInfoResponse;
+use service::error::ServiceError;
+use common::domain::entity::invoice_status::InvoiceStatus;
+use service::repository::invoice_batch_repository::InvoiceBatchRepository;
 
 // --- Handlers ---
 /// 创建一个票据 (Standard endpoint for creating invoice directly in DB)
@@ -452,3 +460,391 @@ async fn query_and_save_from_blockchain(invoice_number: &str, depot: &mut Depot,
         }
     }
 }
+
+// 票据上链接口参数
+#[derive(Deserialize, Serialize, Debug, ToSchema)]
+struct VerifyInvoiceParams {
+    pub id: String,
+}
+
+// 批量发行接口参数
+#[derive(Deserialize, Serialize, Debug, ToSchema)]
+struct IssueInvoicesParams {
+    pub invoice_ids: Vec<String>,
+}
+
+/// 票据上链(将票据状态更新为已上链)
+#[salvo::oapi::endpoint(
+    tags("票据"),
+    status_codes(200, 400, 404, 500),
+    request_body = VerifyInvoiceParams,
+    responses(
+        (status_code = 200, description = "Invoice verified successfully.", body = InvoiceDto),
+        (status_code = 400, description = "Invalid invoice ID."),
+        (status_code = 404, description = "Invoice not found."),
+        (status_code = 500, description = "Internal server error."),
+    )
+)]
+pub async fn verify_invoice(req: &mut Request, depot: &mut Depot) -> Res<InvoiceDto> {
+    // 1. 获取已认证用户的地址（由auth_token中间件插入）
+    let user_address = match depot.get::<String>("user_address") {
+        Ok(address_ref) => address_ref.as_str(),
+        Err(e) => {
+            log::error!("Authenticated user address not found or wrong type in depot: {:?}", e);
+            return Err(res_json_err("User not authenticated"));
+        }
+    };
+
+    // 2. 解析请求参数
+    let params = match req.parse_json::<VerifyInvoiceParams>().await {
+        Ok(p) => p,
+        Err(e) => {
+            log::error!("Failed to parse verify invoice parameters: {:?}", e);
+            return Err(res_bad_request("Invalid request parameters"));
+        }
+    };
+
+    // 3. 获取依赖
+    let mongodb = depot.obtain::<Arc<Database>>().expect("Database connection not found").clone();
+    // 从depot获取已初始化的服务实例
+    let invoice_service = depot.obtain::<Arc<InvoiceService>>().expect("InvoiceService not found in depot");
+
+    // 4. 调用服务将票据状态更新为已上链
+    match invoice_service.verify_invoice(&params.id).await {
+        Ok(invoice) => {
+            log::info!("Successfully verified invoice {} by user {}", params.id, user_address);
+            // 返回成功响应
+            let dto = InvoiceDto::from(&invoice);
+            Ok(res_json_ok(Some(dto)))
+        }
+        Err(e) => {
+            log::error!("Failed to verify invoice {}: {}", params.id, e);
+            match e {
+                ServiceError::NotFound(_) => Err(res_not_found(&format!("Invoice not found: {}", params.id))),
+                ServiceError::InternalError(msg) => Err(res_bad_request(&msg)),
+                ServiceError::MongoDbError(msg) => Err(res_json_err(&format!("Database error: {}", msg))),
+                _ => Err(res_json_err(&format!("Failed to verify invoice: {}", e)))
+            }
+        }
+    }
+}
+
+/// 票据批量发行到市场(将票据状态从已上链更新为在售)
+#[salvo::oapi::endpoint(
+    tags("票据"),
+    status_codes(200, 400, 500),
+    request_body = IssueInvoicesParams,
+    responses(
+        (status_code = 200, description = "Invoices issued successfully.", body = String),
+        (status_code = 400, description = "Invalid request parameters or consistency checks failed."),
+        (status_code = 500, description = "Internal server error."),
+    )
+)]
+pub async fn issue_invoices(req: &mut Request, depot: &mut Depot) -> Res<String> {
+    // 1. 获取已认证用户的地址（由auth_token中间件插入）
+    let user_address = match depot.get::<String>("user_address") {
+        Ok(address_ref) => address_ref.as_str(),
+        Err(e) => {
+            log::error!("Authenticated user address not found or wrong type in depot: {:?}", e);
+            return Err(res_json_err("User not authenticated"));
+        }
+    };
+
+    // 2. 解析请求参数
+    let params = match req.parse_json::<IssueInvoicesParams>().await {
+        Ok(p) => p,
+        Err(e) => {
+            log::error!("Failed to parse issue invoices parameters: {:?}", e);
+            return Err(res_bad_request("Invalid request parameters"));
+        }
+    };
+
+    // 验证参数有效性
+    if params.invoice_ids.is_empty() {
+        return Err(res_bad_request("No invoices selected for issuance"));
+    }
+
+    // 3. 获取依赖
+    let mongodb = depot.obtain::<Arc<Database>>().expect("Database connection not found").clone();
+    // 从depot获取已初始化的服务实例
+    let invoice_service = depot.obtain::<Arc<InvoiceService>>().expect("InvoiceService not found in depot");
+
+    // 4. 调用服务批量更新票据状态为在售(OnSale)
+    match invoice_service.issue_invoices(&params.invoice_ids).await {
+        Ok(count) => {
+            log::info!("Successfully issued {} invoices by user {}", count, user_address);
+            let message = format!("Successfully issued {} invoices", count);
+            Ok(res_json_ok(Some(message)))
+        }
+        Err(e) => {
+            log::error!("Failed to issue invoices: {}", e);
+            // 区分验证错误和其他错误
+            match e {
+                ServiceError::InvoiceNotIssue(msg) if msg.contains("same payee, payer and currency") => {
+                    // 这是一个一致性验证错误
+                    Err(res_json_err(&format!("Consistency check failed: {}", msg)))
+                }
+                ServiceError::InternalError(msg) if msg.contains("No valid verified invoices") => {
+                    // 没有找到有效的已上链票据
+                    Err(res_bad_request("No valid verified invoices found"))
+                }
+                _ => Err(res_json_err(&format!("Failed to issue invoices: {}", e)))
+            }
+        }
+    }
+}
+
+/// 获取当前用户的发票批次列表
+#[salvo::oapi::endpoint(
+    tags("发票批次"),
+    status_codes(200, 401, 500),
+    responses(
+        (status_code = 200, description = "用户发票批次列表", body = Vec<InvoiceBatchDto>),
+        (status_code = 401, description = "用户未认证"),
+        (status_code = 500, description = "服务器内部错误"),
+    )
+)]
+pub async fn list_user_invoice_batches(depot: &mut Depot) -> Res<Vec<InvoiceBatchDto>> {
+    let mongodb = depot.obtain::<Arc<Database>>().expect("Database connection not found").clone();
+    let invoice_batch_repo = InvoiceBatchRepository::new(&mongodb);
+    let enterprise_repo = EnterpriseRepository::new(&mongodb);
+    
+    // 获取认证用户信息
+    let user_id = match depot.get::<String>("user_id") {
+        Ok(id) => id,
+        Err(_) => {
+            error!("User ID not found in depot");
+            return Err(res_json_custom(401, "用户未认证"));
+        }
+    };
+    
+    // 获取用户绑定的企业ID
+    let enterprise_id = match depot.get::<String>("enterprise_id") {
+        Ok(id) => {
+            match ObjectId::parse_str(id) {
+                Ok(oid) => oid,
+                Err(_) => {
+                    error!("Invalid enterprise ID format");
+                    return Err(res_json_err("企业ID格式无效"));
+                }
+            }
+        },
+        Err(_) => {
+            error!("Enterprise ID not found in depot");
+            return Err(res_json_custom(403, "用户未绑定企业"));
+        }
+    };
+    
+    // 查询用户作为债权人的发票批次
+    match invoice_batch_repo.find_by_creditor(enterprise_id).await {
+        Ok(batches) => {
+            let mut batch_dtos = Vec::new();
+            
+            for batch in batches {
+                // 确保批次有ID
+                let batch_id = match batch.id {
+                    Some(id) => id,
+                    None => continue, // 如果没有ID，跳过这个批次
+                };
+                
+                // 获取债权人和债务人信息
+                let creditor = match enterprise_repo.find_by_id(batch.creditor_id).await {
+                    Ok(Some(e)) => e,
+                    _ => continue, // 如果找不到债权人，跳过这个批次
+                };
+                
+                let debtor = match enterprise_repo.find_by_id(batch.debtor_id).await {
+                    Ok(Some(e)) => e,
+                    _ => continue, // 如果找不到债务人，跳过这个批次
+                };
+                
+                // 获取批次中的发票数量
+                let invoice_repo = InvoiceRepository::new(&mongodb);
+                let invoice_count = match invoice_repo.find_by_batch_id(batch_id).await {
+                    Ok(invoices) => invoices.len(),
+                    Err(_) => 0,
+                };
+                
+                // 计算批次总金额
+                let mut total_amount: u64 = 0;
+                if let Ok(invoices) = invoice_repo.find_by_batch_id(batch_id).await {
+                    for invoice in &invoices {
+                        total_amount += invoice.amount;
+                    }
+                }
+                
+                let batch_dto = InvoiceBatchDto {
+                    id: batch_id.to_string(),
+                    creditor_name: creditor.name.clone(),
+                    debtor_name: debtor.name.clone(),
+                    accepted_currency: batch.accepted_currency.clone(),
+                    status: format!("{:?}", batch.status),
+                    created_at: batch.created_at.to_string(),
+                    invoice_count: invoice_count as u32,
+                    total_amount,
+                    token_batch_id: batch.token_batch_id.map(|id| id.to_string()),
+                };
+                
+                batch_dtos.push(batch_dto);
+            }
+            
+            Ok(res_json_ok(Some(batch_dtos)))
+        },
+        Err(e) => {
+            error!("Failed to get user invoice batches: {}", e);
+            Err(res_json_err(&format!("获取发票批次列表失败: {}", e)))
+        }
+    }
+}
+
+/// 获取发票批次详情
+#[salvo::oapi::endpoint(
+    tags("发票批次"),
+    status_codes(200, 400, 404, 500),
+    parameters(
+        ("id" = String, Path, description = "批次ID")
+    ),
+    responses(
+        (status_code = 200, description = "批次详情", body = InvoiceBatchDto),
+        (status_code = 400, description = "无效的批次ID"),
+        (status_code = 404, description = "批次不存在"),
+        (status_code = 500, description = "服务器内部错误"),
+    )
+)]
+pub async fn get_invoice_batch_by_id(id: PathParam<String>, depot: &mut Depot) -> Res<InvoiceBatchDto> {
+    let mongodb = depot.obtain::<Arc<Database>>().expect("Database connection not found").clone();
+    let invoice_batch_repo = InvoiceBatchRepository::new(&mongodb);
+    let enterprise_repo = EnterpriseRepository::new(&mongodb);
+    
+    // 解析批次ID
+    let batch_id = match ObjectId::parse_str(&id.into_inner()) {
+        Ok(oid) => oid,
+        Err(_) => {
+            error!("Invalid batch ID format");
+            return Err(res_bad_request("批次ID格式无效"));
+        }
+    };
+    
+    // 获取批次信息
+    match invoice_batch_repo.find_by_id(batch_id).await {
+        Ok(Some(batch)) => {
+            // 确保批次有ID
+            let batch_id_obj = match batch.id {
+                Some(id) => id,
+                None => {
+                    error!("Batch ID is missing");
+                    return Err(res_json_err("批次ID缺失"));
+                }
+            };
+            
+            // 获取债权人和债务人信息
+            let creditor = match enterprise_repo.find_by_id(batch.creditor_id).await {
+                Ok(Some(e)) => e,
+                _ => {
+                    error!("Creditor not found for batch {}", batch_id);
+                    return Err(res_json_err("找不到批次的债权人信息"));
+                }
+            };
+            
+            let debtor = match enterprise_repo.find_by_id(batch.debtor_id).await {
+                Ok(Some(e)) => e,
+                _ => {
+                    error!("Debtor not found for batch {}", batch_id);
+                    return Err(res_json_err("找不到批次的债务人信息"));
+                }
+            };
+            
+            // 获取批次中的发票数量
+            let invoice_repo = InvoiceRepository::new(&mongodb);
+            let invoice_count = match invoice_repo.find_by_batch_id(batch_id).await {
+                Ok(invoices) => invoices.len(),
+                Err(_) => 0,
+            };
+            
+            // 计算批次总金额
+            let mut total_amount: u64 = 0;
+            if let Ok(invoices) = invoice_repo.find_by_batch_id(batch_id).await {
+                for invoice in &invoices {
+                    total_amount += invoice.amount;
+                }
+            }
+            
+            let batch_dto = InvoiceBatchDto {
+                id: batch_id_obj.to_string(),
+                creditor_name: creditor.name.clone(),
+                debtor_name: debtor.name.clone(),
+                accepted_currency: batch.accepted_currency.clone(),
+                status: format!("{:?}", batch.status),
+                created_at: batch.created_at.to_string(),
+                invoice_count: invoice_count as u32,
+                total_amount,
+                token_batch_id: batch.token_batch_id.map(|id| id.to_string()),
+            };
+            
+            Ok(res_json_ok(Some(batch_dto)))
+        },
+        Ok(None) => {
+            error!("Invoice batch not found: {}", batch_id);
+            Err(res_not_found("找不到指定批次"))
+        },
+        Err(e) => {
+            error!("Failed to get invoice batch: {}", e);
+            Err(res_json_err(&format!("获取批次详情失败: {}", e)))
+        }
+    }
+}
+
+/// 获取批次中的发票列表
+#[salvo::oapi::endpoint(
+    tags("发票批次"),
+    status_codes(200, 400, 404, 500),
+    parameters(
+        ("id" = String, Path, description = "批次ID")
+    ),
+    responses(
+        (status_code = 200, description = "批次中的发票列表", body = Vec<InvoiceDto>),
+        (status_code = 400, description = "无效的批次ID"),
+        (status_code = 404, description = "批次不存在"),
+        (status_code = 500, description = "服务器内部错误"),
+    )
+)]
+pub async fn get_invoices_by_batch_id(id: PathParam<String>, depot: &mut Depot) -> Res<Vec<InvoiceDto>> {
+    let mongodb = depot.obtain::<Arc<Database>>().expect("Database connection not found").clone();
+    let invoice_repo = InvoiceRepository::new(&mongodb);
+    
+    // 解析批次ID
+    let batch_id = match ObjectId::parse_str(&id.into_inner()) {
+        Ok(oid) => oid,
+        Err(_) => {
+            error!("Invalid batch ID format");
+            return Err(res_bad_request("批次ID格式无效"));
+        }
+    };
+    
+    // 获取批次中的发票
+    match invoice_repo.find_by_batch_id(batch_id).await {
+        Ok(invoices) => {
+            let invoice_dtos = invoices.iter().map(InvoiceDto::from).collect::<Vec<InvoiceDto>>();
+            Ok(res_json_ok(Some(invoice_dtos)))
+        },
+        Err(e) => {
+            error!("Failed to get invoices by batch: {}", e);
+            Err(res_json_err(&format!("获取批次发票列表失败: {}", e)))
+        }
+    }
+}
+
+// 定义InvoiceBatchDto
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InvoiceBatchDto {
+    pub id: String,
+    pub creditor_name: String,
+    pub debtor_name: String,
+    pub accepted_currency: String,
+    pub status: String,
+    pub created_at: String,
+    pub invoice_count: u32,
+    pub total_amount: u64,
+    pub token_batch_id: Option<String>,
+}
+

@@ -2,7 +2,7 @@ use std::fmt::Display;
 use salvo_oapi::ToSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize,ToSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum InvoiceStatus {
     Pending,    // 未上链
@@ -11,6 +11,7 @@ pub enum InvoiceStatus {
     Repaid,     // 已清算
     Overdue,    // 已逾期
     Defaulted,  // 已违约
+    OnSale,     // 在售
 }
 
 impl Display for InvoiceStatus {
@@ -22,6 +23,7 @@ impl Display for InvoiceStatus {
             InvoiceStatus::Repaid => "已清算".to_string(),
             InvoiceStatus::Overdue => "已逾期".to_string(),
             InvoiceStatus::Defaulted => "已违约".to_string(),
+            InvoiceStatus::OnSale => "在售".to_string(),
         };
         write!(f, "{}", str)
     }

@@ -8,6 +8,7 @@ use common::domain::entity::{
     CreateTokenBatchRequest, PurchaseTokenRequest, QueryTokenMarketRequest, QueryUserTokenHoldingsRequest,
     TokenBatchStatus, TokenBatchResponse, TokenMarketResponse, TokenHoldingResponse
 };
+use common::domain::entity::token::CreateTokenBatchFromInvoiceBatchRequest;
 use service::service::TokenService;
 
 use crate::utils::res::{Res, res_json_err, res_json_ok, res_json_custom, res_bad_request};
@@ -23,7 +24,6 @@ pub struct TokenHoldingIdResponse {
     holding_id: String,
 }
 
-/// 创建代币批次（必须是债权人或管理员）
 /// 创建代币批次（必须是债权人或管理员）
 #[salvo::oapi::endpoint(
     tags("代币管理"),
@@ -254,6 +254,61 @@ pub async fn get_user_token_holdings(depot: &mut Depot) -> Res<Vec<TokenHoldingR
         Err(e) => {
             error!("Failed to get token holdings: {}", e);
             Err(res_json_err(&format!("查询代币持有列表失败: {}", e)))
+        }
+    }
+}
+
+/// 从发票批次创建代币批次
+#[salvo::oapi::endpoint(
+    tags("代币管理"),
+    status_codes(200, 400, 403, 500),
+    parameters(
+        ("invoice_batch_id" = String, Query, description = "发票批次ID")
+    ),
+    request_body = CreateTokenBatchFromInvoiceBatchRequest,
+    responses(
+        (status_code = 200, description = "代币批次创建成功", body = TokenBatchIdResponse),
+        (status_code = 400, description = "无效的请求参数"),
+        (status_code = 403, description = "无权限创建代币批次"),
+        (status_code = 500, description = "服务器内部错误"),
+    )
+)]
+pub async fn create_token_batch_from_invoice_batch(
+    invoice_batch_id: QueryParam<String>,
+    req: JsonBody<CreateTokenBatchFromInvoiceBatchRequest>,
+    depot: &mut Depot
+) -> Res<TokenBatchIdResponse> {
+    info!("Creating token batch from invoice batch: {:?}", invoice_batch_id);
+    
+    // 获取Token服务
+    let token_service = depot.obtain::<Arc<TokenService>>()
+        .expect("TokenService not found in depot");
+    
+    // 获取认证用户信息
+    let claims = match depot.get::<Claims>("claims") {
+        Ok(claims) => claims,
+        Err(_) => {
+            error!("Failed to get claims from depot");
+            return Err(res_json_custom(403, "认证失败"));
+        }
+    };
+    
+    // 验证用户是债权人或管理员
+    if !claims.is_admin() && !claims.is_creditor() {
+        return Err(res_json_custom(403, "只有债权人或管理员可以创建代币批次"));
+    }
+
+    match token_service.create_token_batch_from_invoice_batch(
+        &invoice_batch_id.into_inner(), 
+        req.into_inner()
+    ).await {
+        Ok(batch_id) => {
+            let response = TokenBatchIdResponse { batch_id };
+            Ok(res_json_ok(Some(response)))
+        },
+        Err(e) => {
+            error!("Failed to create token batch from invoice batch: {}", e);
+            Err(res_json_err(&format!("从发票批次创建代币批次失败: {}", e)))
         }
     }
 } 

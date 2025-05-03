@@ -6,7 +6,7 @@ use mongodb::bson::{oid::ObjectId, DateTime};
 use salvo::oapi::ToSchema;
 use crate::domain::entity::invoice_status::InvoiceStatus;
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone,Serialize,PartialEq, Deserialize, ToSchema)]
 pub struct InvoiceRedisDto {
     pub invoice_id: String,
     pub invoice_number: String,
@@ -21,11 +21,6 @@ pub struct InvoiceRedisDto {
     pub status: InvoiceStatus,
 }
 
-impl PartialEq for InvoiceStatus {
-    fn eq(&self, other: &Self) -> bool {
-        todo!()
-    }
-}
 
 impl InvoiceRedisDto {
     pub fn calculate_daily_rate(&self, is_leap_year: bool) -> f64 {

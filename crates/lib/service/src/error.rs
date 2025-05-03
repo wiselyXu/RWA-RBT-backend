@@ -30,6 +30,9 @@ pub enum ServiceError {
     #[error("Invoice not found: {0}")]
     InvoiceNotFound(String),
 
+    #[error("Invoice not issue: {0}")]
+    InvoiceNotIssue(String),
+
     #[error("Invoice not available for purchase: {0}")]
     InvoiceNotAvailable(String),
 

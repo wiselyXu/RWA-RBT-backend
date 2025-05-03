@@ -12,17 +12,21 @@ use common::domain::entity::{
     Enterprise, Invoice, User,
     CreateTokenBatchRequest, PurchaseTokenRequest, QueryTokenMarketRequest, QueryUserTokenHoldingsRequest,
     TokenBatchResponse, TokenMarketResponse, TokenHoldingResponse,
+    invoice_batch::InvoiceBatchStatus
 };
+use common::domain::entity::token::CreateTokenBatchFromInvoiceBatchRequest;
 use crate::error::ServiceError;
 use crate::repository::{
-    TokenRepository, InvoiceRepository, EnterpriseRepository, UserRepository
+    TokenRepository, InvoiceRepository, EnterpriseRepository, UserRepository, InvoiceBatchRepository
 };
+use mongodb::Database;
 
 pub struct TokenService {
     token_repository: Arc<TokenRepository>,
     invoice_repository: Arc<InvoiceRepository>,
     enterprise_repository: Arc<EnterpriseRepository>,
     user_repository: Arc<UserRepository>,
+    database: Arc<Database>,
 }
 
 impl TokenService {
@@ -31,12 +35,14 @@ impl TokenService {
         invoice_repository: Arc<InvoiceRepository>,
         enterprise_repository: Arc<EnterpriseRepository>,
         user_repository: Arc<UserRepository>,
+        database: Arc<Database>,
     ) -> Self {
         Self {
             token_repository,
             invoice_repository,
             enterprise_repository,
             user_repository,
+            database,
         }
     }
 
@@ -420,5 +426,185 @@ impl TokenService {
         }
 
         Ok(responses)
+    }
+
+    /// 从发票批次创建token批次
+    pub async fn create_token_batch_from_invoice_batch(
+        &self, 
+        invoice_batch_id: &str,
+        token_batch_request: CreateTokenBatchFromInvoiceBatchRequest
+    ) -> Result<String, ServiceError> {
+        // 解析发票批次ID
+        let batch_id = ObjectId::parse_str(invoice_batch_id).map_err(|e| {
+            ServiceError::InternalError(format!("Invalid invoice batch ID: {}", e))
+        })?;
+
+        // 使用已注入的数据库实例创建仓库
+        let invoice_batch_repo = InvoiceBatchRepository::new(&self.database);
+        
+        let invoice_batch = invoice_batch_repo.find_by_id(batch_id).await
+            .map_err(|e| ServiceError::NotFound(format!("Invoice batch not found: {}", e)))?
+            .ok_or_else(|| ServiceError::NotFound("Invoice batch not found".to_string()))?;
+        
+        // 确保批次状态为Issued
+        if invoice_batch.status != InvoiceBatchStatus::Issued {
+            return Err(ServiceError::InternalError(
+                format!("Invoice batch is not in Issued status, current status: {:?}", invoice_batch.status)
+            ));
+        }
+        
+        // 获取批次中的所有发票
+        let invoices = self.invoice_repository.find_by_batch_id(batch_id).await
+            .map_err(|e| ServiceError::NotFound(format!("Failed to fetch invoices: {}", e)))?;
+        
+        if invoices.is_empty() {
+            return Err(ServiceError::NotFound("No invoices found in this batch".to_string()));
+        }
+        
+        // 计算批次总金额
+        let mut total_amount: u64 = 0;
+        let mut earliest_due_date = i64::MAX;
+        
+        for invoice in &invoices {
+            total_amount += invoice.amount;
+            if invoice.due_date < earliest_due_date {
+                earliest_due_date = invoice.due_date;
+            }
+        }
+        
+        // 将总金额转换为Decimal128用于Token批次创建
+        let total_amount_d128 = Decimal128::from_str(&total_amount.to_string())
+            .map_err(|e| ServiceError::InternalError(format!("Failed to convert amount: {}", e)))?;
+            
+        // 设置零值用于初始化
+        let zero_d128 = Decimal128::from_str("0")
+            .map_err(|e| ServiceError::InternalError(format!("Failed to create zero value: {}", e)))?;
+            
+        // 处理令牌值和总供应量
+        let token_value_d128 = Decimal128::from_str(&token_batch_request.token_value)
+            .map_err(|e| ServiceError::InternalError(format!("Failed to convert token value: {}", e)))?;
+            
+        // 计算令牌总供应量
+        let total_value = Decimal::from_str(&total_amount.to_string())
+            .map_err(|e| ServiceError::InternalError(format!("Failed to convert total amount: {}", e)))?;
+        let token_value = Decimal::from_str(&token_batch_request.token_value)
+            .map_err(|e| ServiceError::InternalError(format!("Failed to convert token value: {}", e)))?;
+        let total_supply = (total_value / token_value).round();
+        
+        let total_token_supply_d128 = Decimal128::from_str(&total_supply.to_string())
+            .map_err(|e| ServiceError::InternalError(format!("Failed to convert token supply: {}", e)))?;
+            
+        // 处理利率
+        let interest_rate_d128 = Decimal128::from_str(&token_batch_request.interest_rate_apy)
+            .map_err(|e| ServiceError::InternalError(format!("Failed to convert interest rate: {}", e)))?;
+            
+        // 处理到期日
+        let maturity_date = if let Some(custom_maturity_date) = token_batch_request.maturity_date {
+            // 如果提供了自定义到期日，则使用它
+            match DateTime::parse_rfc3339_str(&custom_maturity_date) {
+                Ok(date) => date,
+                Err(_) => {
+                    // 如果解析失败，则使用发票中的最早到期日
+                    DateTime::from_millis(earliest_due_date)
+                }
+            }
+        } else {
+            // 使用发票中的最早到期日期
+            DateTime::from_millis(earliest_due_date)
+        };
+        
+        // 获取债权人和债务人信息
+        let creditor = self.enterprise_repository.find_by_id(invoice_batch.creditor_id).await
+            .map_err(|e| ServiceError::NotFound(format!("Creditor not found: {}", e)))?
+            .ok_or_else(|| ServiceError::NotFound("Creditor not found".to_string()))?;
+            
+        let debtor = self.enterprise_repository.find_by_id(invoice_batch.debtor_id).await
+            .map_err(|e| ServiceError::NotFound(format!("Debtor not found: {}", e)))?
+            .ok_or_else(|| ServiceError::NotFound("Debtor not found".to_string()))?;
+            
+        // 创建token批次
+        let token_batch = TokenBatch {
+            id: None,
+            batch_reference: token_batch_request.batch_reference,
+            invoice_id: batch_id, // 使用invoice_batch的ID，而不是单个发票
+            creditor_id: invoice_batch.creditor_id,
+            debtor_id: invoice_batch.debtor_id,
+            stablecoin_symbol: token_batch_request.stablecoin_symbol,
+            total_token_supply: total_token_supply_d128,
+            token_value: token_value_d128,
+            total_value: total_amount_d128,
+            contract_address: None,
+            sold_token_amount: zero_d128,
+            available_token_amount: total_token_supply_d128,
+            status: TokenBatchStatus::Available,
+            interest_rate_apy: interest_rate_d128,
+            created_at: DateTime::now(),
+            updated_at: DateTime::now(),
+            maturity_date,
+        };
+        
+        // 启动MongoDB事务
+        let mut session = self.database.client().start_session().await
+            .map_err(|e| ServiceError::MongoDbError(format!("Failed to start MongoDB session: {}", e)))?;
+        
+        session.start_transaction().await
+            .map_err(|e| ServiceError::MongoDbError(format!("Failed to start transaction: {}", e)))?;
+            
+        match async {
+            // 保存token批次
+            let token_batch_id = self.token_repository.create_token_batch_with_session(token_batch.clone(), &mut session).await
+                .map_err(|e| ServiceError::MongoDbError(format!("Failed to create token batch: {}", e)))?;
+                
+            // 创建token市场条目
+            let token_market = TokenMarket {
+                id: None,
+                batch_id: token_batch_id,
+                batch_reference: token_batch.batch_reference.clone(),
+                creditor_address: creditor.wallet_address.clone(),
+                debtor_address: debtor.wallet_address.clone(),
+                stablecoin_symbol: token_batch.stablecoin_symbol.clone(),
+                total_token_amount: token_batch.total_token_supply,
+                sold_token_amount: zero_d128,
+                available_token_amount: token_batch.available_token_amount,
+                purchased_token_amount: zero_d128,
+                token_value_per_unit: token_batch.token_value,
+                remaining_transaction_amount: token_batch.total_value,
+                created_at: DateTime::now(),
+                updated_at: DateTime::now(),
+            };
+            
+            // 保存token市场
+            self.token_repository.create_token_market_with_session(token_market, &mut session).await
+                .map_err(|e| ServiceError::MongoDbError(format!("Failed to create token market: {}", e)))?;
+                
+            // 更新发票批次的token_batch_id和状态
+            invoice_batch_repo.update_token_batch_id_with_session(batch_id, token_batch_id, &mut session).await
+                .map_err(|e| ServiceError::MongoDbError(format!("Failed to update invoice batch: {}", e)))?;
+                
+            // 更新发票批次状态为Trading
+            invoice_batch_repo.update_status_with_session(batch_id, 
+                InvoiceBatchStatus::Trading, &mut session).await
+                .map_err(|e| ServiceError::MongoDbError(format!("Failed to update invoice batch status: {}", e)))?;
+            
+            Result::<_, ServiceError>::Ok(token_batch_id)
+        }.await {
+            Ok(id) => {
+                // 提交事务
+                session.commit_transaction().await
+                    .map_err(|e| {
+                        error!("Failed to commit transaction: {}", e);
+                        ServiceError::MongoDbError(format!("Failed to commit transaction: {}", e))
+                    })?;
+                    
+                Ok(id.to_hex())
+            },
+            Err(e) => {
+                // 出错时回滚事务
+                if let Err(abort_err) = session.abort_transaction().await {
+                    error!("Failed to abort transaction: {}", abort_err);
+                }
+                Err(e)
+            }
+        }
     }
 } 

@@ -132,6 +132,26 @@ impl TokenRepository {
         Ok(token_batches)
     }
 
+    // Token Batch CRUD operations with session support
+    pub async fn create_token_batch_with_session(&self, token_batch: TokenBatch, session: &mut mongodb::ClientSession) -> Result<ObjectId> {
+        let mut token_batch = token_batch;
+        let now = DateTime::now();
+        token_batch.created_at = now;
+        token_batch.updated_at = now;
+        
+        let doc = to_document(&token_batch)?;
+        
+        let result = self.token_batch_collection.insert_one(doc)
+            .session(session)
+            .await?;
+        
+        let id = result.inserted_id.as_object_id()
+            .ok_or_else(|| anyhow::anyhow!("Failed to get inserted id"))?;
+        
+        info!("Created token batch with id: {}", id);
+        Ok(id)
+    }
+
     // Token Market CRUD operations
     pub async fn create_token_market(&self, token_market: TokenMarket) -> Result<ObjectId> {
         let mut token_market = token_market;
@@ -232,6 +252,26 @@ impl TokenRepository {
         }
         
         Ok(token_markets)
+    }
+
+    // Token Market CRUD operations with session support
+    pub async fn create_token_market_with_session(&self, token_market: TokenMarket, session: &mut mongodb::ClientSession) -> Result<ObjectId> {
+        let mut token_market = token_market;
+        let now = DateTime::now();
+        token_market.created_at = now;
+        token_market.updated_at = now;
+        
+        let doc = to_document(&token_market)?;
+        
+        let result = self.token_market_collection.insert_one(doc)
+            .session(session)
+            .await?;
+        
+        let id = result.inserted_id.as_object_id()
+            .ok_or_else(|| anyhow::anyhow!("Failed to get inserted id"))?;
+        
+        info!("Created token market with id: {}", id);
+        Ok(id)
     }
 
     // Token Holding CRUD operations

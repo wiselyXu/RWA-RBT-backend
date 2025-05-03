@@ -179,6 +179,16 @@ pub struct QueryUserTokenHoldingsRequest {
     pub user_id: String,
 }
 
+// 从发票批次创建Token批次的请求
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CreateTokenBatchFromInvoiceBatchRequest {
+    pub batch_reference: String,
+    pub stablecoin_symbol: String,
+    pub token_value: String,
+    pub interest_rate_apy: String,
+    pub maturity_date: Option<String>,  // 可选，如不提供则使用发票中最早的到期日
+}
+
 // Response DTOs
 
 // Token Batch Response

@@ -143,7 +143,8 @@ pub fn init_service(
         token_repository,
         invoice_repository,
         enterprise_repository,
-        user_repository
+        user_repository,
+        mongodb.clone()
     ));
 
     // Create the injector instance

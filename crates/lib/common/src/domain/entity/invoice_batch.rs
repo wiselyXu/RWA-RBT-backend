@@ -8,22 +8,18 @@ pub struct InvoiceBatch {
     pub creditor_id: ObjectId, // Reference to Enterprise
     pub debtor_id: ObjectId,   // Reference to Enterprise
     pub rbt_token_address: Option<String>, // Blockchain address of the RBT token
-    pub total_amount: Decimal128,
     pub accepted_currency: String, // e.g., "USDC"
-    pub interest_rate_apy: Decimal128,
-    pub default_interest_rate_apy: Decimal128,
-    pub issuance_date: DateTime,
-    pub maturity_date: DateTime,
+    pub token_batch_id: Option<ObjectId>, // Reference to TokenBatch after creation
     pub status: InvoiceBatchStatus,
     pub created_at: DateTime,
     pub updated_at: DateTime,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize,PartialEq)]
 pub enum InvoiceBatchStatus {
     Packaging, // Invoices being added
-    Issued,    // RBT minted, ready for market
-    Trading,   // RBT being bought/sold
+    Issued,    // Invoices packaged, ready for token creation
+    Trading,   // Associated with TokenBatch and trading
     Repaying,  // Debtor is making repayments
     Settled,   // Fully repaid
     Defaulted, // Failed to repay
@@ -34,11 +30,7 @@ impl InvoiceBatch {
     pub fn new(
         creditor_id: ObjectId,
         debtor_id: ObjectId,
-        total_amount: Decimal128,
         accepted_currency: String,
-        interest_rate_apy: Decimal128,
-        default_interest_rate_apy: Decimal128,
-        maturity_date: DateTime,
     ) -> Self {
         let now = DateTime::now();
         Self {
@@ -46,12 +38,8 @@ impl InvoiceBatch {
             creditor_id,
             debtor_id,
             rbt_token_address: None,
-            total_amount,
             accepted_currency,
-            interest_rate_apy,
-            default_interest_rate_apy,
-            issuance_date: now,
-            maturity_date,
+            token_batch_id: None,
             status: InvoiceBatchStatus::Packaging,
             created_at: now,
             updated_at: now,

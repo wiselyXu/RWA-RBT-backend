@@ -34,6 +34,21 @@ export interface Invoice {
 }
 
 /**
+ * 发票批次接口
+ */
+export interface InvoiceBatch {
+  id: string;
+  creditor_name: string;
+  debtor_name: string;
+  accepted_currency: string;
+  status: string;
+  created_at: string;
+  invoice_count?: number;
+  total_amount?: number;
+  token_batch_id?: string;
+}
+
+/**
  * 创建票据参数 (与后端 DTO 对齐)
  */
 export interface CreateInvoiceParams {
@@ -72,6 +87,19 @@ class InvoiceService {
       return invoices || [];
     } catch (error) {
       console.error('Failed to get user invoices:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取当前用户的发票批次列表
+   */
+  public async getUserInvoiceBatches(): Promise<InvoiceBatch[]> {
+    try {
+      const batches = await this.apiService.get<InvoiceBatch[]>('/invoice/batches');
+      return batches || [];
+    } catch (error) {
+      console.error('获取用户发票批次失败:', error);
       throw error;
     }
   }
@@ -128,6 +156,62 @@ class InvoiceService {
       await this.apiService.delete<{ message: string } | void>(`/invoice/del?id=${invoiceId}`);
     } catch (error) {
       console.error(`Failed to delete invoice ${invoiceId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 将票据状态更新为"已上链"(Verified)
+   * @param invoiceId 票据ID
+   */
+  public async verifyInvoice(invoiceId: string): Promise<Invoice> {
+    try {
+      const response = await this.apiService.post<Invoice>('/invoice/verify', { id: invoiceId });
+      return response;
+    } catch (error) {
+      console.error(`Failed to verify invoice ${invoiceId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 批量发行票据到token市场
+   * @param invoiceIds 要发行的票据ID数组
+   */
+  public async issueInvoices(invoiceIds: string[]): Promise<any> {
+    try {
+      const response = await this.apiService.post<any>('/invoice/issue', { invoice_ids: invoiceIds });
+      return response;
+    } catch (error) {
+      console.error('Failed to issue invoices:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取发票批次详情
+   * @param batchId 批次ID
+   */
+  public async getInvoiceBatchById(batchId: string): Promise<any> {
+    try {
+      const response = await this.apiService.get<any>(`/invoice/batch/${batchId}`);
+      return response;
+    } catch (error) {
+      console.error('获取发票批次详情失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取批次中的发票列表
+   * @param batchId 批次ID
+   */
+  public async getInvoicesByBatchId(batchId: string): Promise<any> {
+    try {
+      const response = await this.apiService.get<any>(`/invoice/batch/${batchId}/invoices`);
+      return response;
+    } catch (error) {
+      console.error('获取批次中的发票失败:', error);
       throw error;
     }
   }

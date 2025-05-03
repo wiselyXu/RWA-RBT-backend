@@ -209,4 +209,12 @@ impl InvoiceRepository {
 
         self.collection.update_one(filter, update).await
     }
+
+    // 查找属于特定批次的所有发票
+    pub async fn find_by_batch_id(&self, batch_id: ObjectId) -> Result<Vec<Invoice>, mongodb::error::Error> {
+        let filter = doc! { "batch_id": batch_id };
+        let find_options = FindOptions::builder().sort(doc! { "created_at": -1 }).build();
+        let cursor = self.collection.find(filter).with_options(find_options).await?;
+        cursor.try_collect().await
+    }
 }
