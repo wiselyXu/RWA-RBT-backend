@@ -38,8 +38,8 @@ pub struct TokenBatch {
     pub id: Option<ObjectId>,            // Unique identifier for the batch
     pub batch_reference: String,         // User-friendly reference (e.g., BATCH-001)
     pub invoice_id: ObjectId,            // Foreign key to the associated invoice
-    pub creditor_id: ObjectId,           // Foreign key to the creditor user/entity
-    pub debtor_id: ObjectId,             // Foreign key to the debtor entity
+    pub payee: String,           // Foreign key to the creditor user/entity
+    pub payer: String,             // Foreign key to the debtor entity
     
     pub stablecoin_symbol: String,       // Symbol of the stablecoin used (e.g., USDT, HKDC, MNT)
     pub total_token_supply: Decimal128,  // Total number of tokens issued in this batch
@@ -66,8 +66,8 @@ pub struct TokenMarket {
     pub id: Option<ObjectId>,
     pub batch_id: ObjectId,              // Reference to the TokenBatch
     pub batch_reference: String,         // For easier querying (e.g., BATCH-1)
-    pub creditor_address: String,        // Blockchain address of the creditor
-    pub debtor_address: String,          // Blockchain address of the debtor
+    pub payee: String,        // Blockchain address of the creditor
+    pub payer: String,          // Blockchain address of the debtor
     pub stablecoin_symbol: String,       // MNT, HKDC, USDT etc.
     pub total_token_amount: Decimal128,  // Total tokens in this batch
     pub sold_token_amount: Decimal128,   // Tokens that have been sold
@@ -196,8 +196,8 @@ pub struct CreateTokenBatchFromInvoiceBatchRequest {
 pub struct TokenBatchResponse {
     pub id: String,
     pub batch_reference: String,
-    pub creditor_name: String,
-    pub debtor_name: String,
+    pub payee: String,
+    pub payer: String,
     pub stablecoin_symbol: String,
     pub total_token_supply: String,
     pub token_value: String,
@@ -214,8 +214,8 @@ pub struct TokenBatchResponse {
 pub struct TokenMarketResponse {
     pub id: String,
     pub batch_reference: String,
-    pub creditor_address: String,
-    pub debtor_address: String,
+    pub payee: String,
+    pub payer: String,
     pub stablecoin_symbol: String,
     pub total_token_amount: String,
     pub sold_token_amount: String,

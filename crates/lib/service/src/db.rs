@@ -14,16 +14,28 @@ pub async fn init_mongodb(db_config: &DbConfig) -> Result<Database, mongodb::err
     // Optionally set additional options
     client_options.app_name = Some("pharos-rwa".to_string());
     // Create the client
-    let client = Client::with_options(client_options)?;
-    
-    // Get a handle to the database
-    let db_name = db_config.url.split('/').last().unwrap_or("pharos_rwa");
-    let db = client.database(db_name);
-    
+    // 如果连接字符串中**包含**了数据库名 (如 /pharos_rwa)，通常可以直接用 client.database("您的数据库名")
+    // 驱动会知道如何使用解析出的认证信息等连接到服务器并操作指定的数据库。
+    // 或者，更安全的做法是获取解析出的默认数据库名：
+    let db_name = client_options.default_database.as_deref().ok_or_else(|| {
+        error!("Database name not specified in connection string, which is required.");
+        mongodb::error::Error::custom("Database name not specified in connection string")
+    })?;
+
+
+    // Create the client
+    let client = Client::with_options(client_options.clone())?;
+
+    // Get a handle to the database using the correctly parsed name
+    // 现在传递的是从 ClientOptions 中获取的，或者硬编码的正确数据库名
+    let db = client.database(db_name); // 使用正确解析出的数据库名
+
     // Ping the database to test the connection
-    match client.list_database_names().await {
-        Ok(_) => info!("Successfully connected to MongoDB"),
-        Err(e) => error!("Failed to connect to MongoDB: {}", e),
+    match db.run_command(mongodb::bson::doc! {"ping": 1}).await {
+        Ok(_) => info!("Successfully connected to MongoDB and selected database '{}'", db_name),
+        Err(e) => {
+            error!("Failed to ping database '{}': {}", db_name, e);
+        }
     }
     
     Ok(db)

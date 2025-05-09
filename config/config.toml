@@ -29,11 +29,8 @@ producer_timeout_ms = 1000
 [database]
 # url = 'mysql://exchange:sbxz4014@192.168.6.31:3307/rwa' mongodb://localhost:27017
 #url = 'mongodb://admin:pharos@43.134.99.111:27017/pharos_rwa'
-url = 'mongodb://admin:pharos@43.134.99.111:27017/pharos_rwa?authSource=admin&authMechanism=SCRAM-SHA-256'
-username = "admin"
-password = "pharos"
-init_database = true
-sync_tables = true
+url = 'mongodb://admin:pharos@43.134.99.111:27017/pharos_rwa?authSource=admin&authMechanism=SCRAM-SHA-256&retryWrites=false'
+
 
 
 

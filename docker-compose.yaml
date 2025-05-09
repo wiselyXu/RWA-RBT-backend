@@ -9,9 +9,6 @@ services:
       driver: json-file
       options:
         max-size: 500m
-    networks:
-      solar:
-        ipv4_address: 172.8.0.20
     ports:
       - "8080:8080"  # host物理直接映射端口为13306
     volumes:
@@ -39,7 +36,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - /home/home/server/config:/app/config
+      - /root/server/config:/app/config
     environment:
       - PHAROS_RPC_URL=https://rpc.sepolia.mantle.xyz
       - INVOICE_CONTRACT_ADDRESS=0x3fdBBc8074978c7fd8941efB71d1a8d71327E1C1

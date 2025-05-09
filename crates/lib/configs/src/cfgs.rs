@@ -66,14 +66,6 @@ pub struct Http {
 pub struct Database {
     /// 数据库连接
     pub url: String,
-    /// 用户名
-    pub username: String,
-    /// 密码
-    pub password: String,
-    /// 是否初始化数据库
-    pub init_database: bool,
-    /// 是否初始化数据表
-    pub sync_tables: bool,
 }
 
 /// 数据库配置

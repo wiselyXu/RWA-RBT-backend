@@ -114,15 +114,18 @@ impl InvoiceService {
         
         for invoice_id in invoice_ids {            
             // 获取票据
-            let invoice = match self.invoice_repository.find_by_invoice_number(invoice_id).await {
+            let invoice = match self.invoice_repository.find_by_id(invoice_id.parse().unwrap()).await {
                 Ok(Some(invoice)) => invoice,
                 Ok(None) => {
                     warn!("Invoice not found: {}", invoice_id);
-                    continue;
+                    // Consider if you want to continue processing other valid invoices or stop entirely.
+                    // For now, we'll break as per original logic.
+                    return Err(ServiceError::InvoiceNotFound(invoice_id.clone()));
                 },
                 Err(e) => {
                     error!("Failed to find invoice {}: {}", invoice_id, e);
-                    continue;
+                    // Propagate the error or handle as appropriate
+                    return Err(ServiceError::MongoDbError(format!("Failed to find invoice {}: {}", invoice_id, e)));
                 }
             };
             
@@ -132,7 +135,11 @@ impl InvoiceService {
                     "Invoice {} cannot be issued: status is {:?}, expected Verified", 
                     invoice_id, invoice.status
                 );
-                continue;
+                // Return an error if an invoice is not in the correct state
+                return Err(ServiceError::InvoiceNotIssue(format!(
+                    "Invoice {} cannot be issued: status is {:?}, expected Verified", 
+                    invoice_id, invoice.status
+                )));
             }
             valid_invoices.push(invoice);
         }
@@ -142,7 +149,7 @@ impl InvoiceService {
             return Err(ServiceError::InvoiceNotIssue("No valid verified invoices found for issuance".to_string()));
         }
         
-        // 验证所有票据的债权人、债务人和货币种类是否一致
+        // 验证所有票据的债权人、债务人和货币种类是否一致 (This validation block is kept as per previous logic)
         let first_invoice = &valid_invoices[0];
         let expected_payee = &first_invoice.payee;
         let expected_payer = &first_invoice.payer;
@@ -159,97 +166,87 @@ impl InvoiceService {
             }
         }
         
-        // 启动MongoDB事务
-        let mut session = self.db.client().start_session().await
-            .map_err(|e| ServiceError::MongoDbError(format!("Failed to start MongoDB session: {}", e)))?;
-        
-        session.start_transaction().await
-            .map_err(|e| ServiceError::MongoDbError(format!("Failed to start transaction: {}", e)))?;
+        // Transactions are removed. Operations will be performed individually.
         
         let mut success_count = 0;
-        let batch_id: Option<ObjectId>;
         
-        // 使用事务处理批量更新
-        match async {
-            // 尝试将payee和payer转换为ObjectId
-            // 在实际场景中，可能需要查询Enterprise表来获取正确的ObjectId
-            let creditor_id = match ObjectId::from_str(expected_payee) {
-                Ok(id) => id,
-                Err(_) => {
-                    return Err(ServiceError::InvoiceNotIssue(
-                        format!("Invalid creditor id format: {}", expected_payee)
-                    ));
-                }
-            };
-            
-            let debtor_id = match ObjectId::from_str(expected_payer) {
-                Ok(id) => id,
-                Err(_) => {
-                    return Err(ServiceError::InvoiceNotIssue(
-                        format!("Invalid debtor id format: {}", expected_payer)
-                    ));
-                }
-            };
-            
-            // 创建InvoiceBatch实例，不包含金额和利率信息
-            let invoice_batch = common::domain::entity::invoice_batch::InvoiceBatch::new(
-                creditor_id,
-                debtor_id,
-                expected_currency.clone()
-            );
-            
-            // 保存批次到数据库
-            let batch_repo = crate::repository::InvoiceBatchRepository::new(&self.db);
-            let saved_batch = batch_repo.create_with_session(&invoice_batch, &mut session).await?;
-            
-            // 更新所有票据状态为Packaged并关联到批次
-            for invoice in &valid_invoices {
-                if let Some(id) = invoice.id {
-                    if let Some(batch_obj_id) = saved_batch.id {
-                        // 将票据关联到批次
-                        self.invoice_repository.add_to_batch(id, batch_obj_id).await
-                            .map_err(|e| ServiceError::MongoDbError(format!("Failed to add invoice to batch: {}", e)))?;
-                        
-                        success_count += 1;
-                    } else {
-                        return Err(ServiceError::InvoiceNotIssue("Batch ID is missing after creation".to_string()));
-                    }
-                }
-            }
-            
-            // 如果没有成功更新任何票据，回滚事务并返回错误
-            if success_count == 0 {
-                return Err(ServiceError::InternalError("Failed to issue any invoices".to_string()));
-            }
-            
-            // 将批次状态更新为已发行
-            if let Some(batch_obj_id) = saved_batch.id {
-                batch_repo.update_status(batch_obj_id, common::domain::entity::invoice_batch::InvoiceBatchStatus::Issued).await
-                    .map_err(|e| ServiceError::MongoDbError(format!("Failed to update batch status: {}", e)))?;
-            }
-            
-            // 成功完成
-            Result::<_, ServiceError>::Ok(saved_batch.id)
-        }.await {
-            Ok(id) => {
-                // 提交事务
-                session.commit_transaction().await
-                    .map_err(|e| {
-                        error!("Failed to commit transaction: {}", e);
-                        ServiceError::MongoDbError(format!("Failed to commit transaction: {}", e))
-                    })?;
-                
-                batch_id = id;
-                info!("Successfully issued {} invoices into batch {:?}", success_count, batch_id);
-                Ok(success_count)
-            },
+        // Create InvoiceBatch instance
+        let invoice_batch_data = common::domain::entity::invoice_batch::InvoiceBatch::new(
+            expected_payee,
+            expected_payer,
+            expected_currency.clone()
+        );
+        
+        let batch_repo = crate::repository::InvoiceBatchRepository::new(&self.db);
+        
+        // Save the batch to the database (assuming a 'create' method exists or will be created that doesn't require a session)
+        let saved_batch = match batch_repo.create(&invoice_batch_data).await {
+            Ok(batch) => batch,
             Err(e) => {
-                // 出错时回滚事务
-                if let Err(abort_err) = session.abort_transaction().await {
-                    error!("Failed to abort transaction: {}", abort_err);
-                }
-                Err(e)
+                error!("Failed to create invoice batch: {}", e);
+                return Err(ServiceError::from(e)); // Propagate the error
             }
+        };
+        
+        // Update all valid invoices to be Packaged and associate them with the batch
+        for invoice in &valid_invoices {
+            if let Some(id) = invoice.id {
+                if let Some(batch_obj_id) = saved_batch.id {
+                    match self.invoice_repository.add_to_batch(id, batch_obj_id).await {
+                        Ok(_) => {
+                            success_count += 1;
+                        }
+                        Err(e) => {
+                            error!("Failed to add invoice {} to batch {}: {}", id, batch_obj_id, e);
+                            // Decide how to handle partial failures. For now, log and continue,
+                            // but the batch is created. Consider if this is the desired behavior.
+                            // Alternatively, you could try to "undo" or mark the batch as problematic.
+                        }
+                    }
+                } else {
+                    // This should ideally not happen if batch creation was successful and returned an ID.
+                    error!("Batch ID is missing after creation, cannot associate invoice {}", id);
+                    // Consider returning an error here as it indicates a problem with batch creation logic.
+                    return Err(ServiceError::InternalError("Batch ID is missing after successful creation".to_string()));
+                }
+            }
+        }
+        
+        if success_count == 0 && !valid_invoices.is_empty() {
+            // If a batch was created but no invoices could be added to it.
+            // This might leave an empty batch. Consider if this is acceptable or if the batch should be deleted/marked.
+            error!("Batch {} created, but failed to add any invoices to it.", saved_batch.id.map_or_else(|| "UnknownID".to_string(), |id| id.to_string()));
+            return Err(ServiceError::InternalError("Batch created, but failed to associate any invoices.".to_string()));
+        } else if success_count < valid_invoices.len() {
+             warn!("Batch {} created. Successfully added {} out of {} invoices.",
+                saved_batch.id.map_or_else(|| "UnknownID".to_string(), |id| id.to_string()),
+                success_count,
+                valid_invoices.len()
+            );
+            // Partial success, proceed to update batch status
+        }
+
+
+        // Update the batch status to Issued
+        if let Some(batch_obj_id) = saved_batch.id {
+            match batch_repo.update_status(batch_obj_id, common::domain::entity::invoice_batch::InvoiceBatchStatus::Issued).await {
+                Ok(_) => {
+                    info!("Successfully issued {} invoices into batch {}. Batch status updated to Issued.", success_count, batch_obj_id);
+                    Ok(success_count)
+                }
+                Err(e) => {
+                    error!("Failed to update batch {} status to Issued: {}. {} invoices were associated.", batch_obj_id, e, success_count);
+                    // Even if batch status update fails, invoices were associated.
+                    // Return the count of associated invoices but log the status update error.
+                    // The caller needs to be aware that the batch might not be in 'Issued' state.
+                    // Consider if a more specific error should be returned to indicate this.
+                    Err(ServiceError::MongoDbError(format!("Failed to update batch status to Issued for batch {}: {}", batch_obj_id, e)))
+                }
+            }
+        } else {
+            // This case should ideally be caught earlier
+            error!("Cannot update status for a batch with no ID. {} invoices processed.", success_count);
+            Err(ServiceError::InternalError("Cannot update status for a batch with no ID.".to_string()))
         }
     }
     
